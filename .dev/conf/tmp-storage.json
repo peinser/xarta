@@ -1,0 +1,11 @@
+{
+  "kind": "s3",
+  "bucket": "xarta-tmp",
+  "prefix": "documents",
+  "endpoint_url": "http://minio:9000",
+  "aws_access_key_id": "xarta-dev",
+  "aws_secret_access_key": "xarta-dev-secret",
+  "region_name": "us-east-1",
+  "use_ssl": false,
+  "max_pool_connections": 20
+}

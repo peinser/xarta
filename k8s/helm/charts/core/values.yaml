@@ -1,0 +1,539 @@
+## Copyright Peinser BV
+##
+
+## Global configuration that is applicable to all resources and will be used
+## as a default unless specifically overwritten.
+##
+defaults:
+  ## Default common pod properties.
+  ##
+  replicas: 1
+  dnsPolicy: ClusterFirst
+  restartPolicy: Always
+  ## Default ingress configuration.
+  ##
+  ingress:
+    enabled: false
+    ingressClassName: nginx
+    clusterIssuer: letsencrypt-production
+    maxBodySize: 8m
+    class: nginx
+    hosts: []
+    # - dns: xarta.example.com
+    #   tls: true
+    whitelist: null
+  ## Default deployment autoscaling configuration.
+  ##
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 80
+    # targetMemoryUtilizationPercentage: 90
+  ## Grafana Loki integration for log scraping.
+  ##
+  loki:
+    enabled: false
+    tenant: null
+  ## Default pod node selector.
+  ##
+  nodeSelector: {}
+  ## Default pod tolerations.
+  ##
+  tolerations: []
+  ## Default pod (anti) affinity.
+  affinity: {}
+  ## Container security context.
+  ##
+  securityContext:
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+    allowPrivilegeEscalation: false
+    privileged: false
+    runAsNonRoot: true
+  ## Default pod resources configuration.
+  ##
+  resources:
+    requests:
+      cpu: 64m
+      memory: 256Mi
+    # Set explicit defaults to prevent one document workload from exhausting a node.
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  ## Probe configuration.
+  ##
+  probes:
+    ## Startup probe.
+    ##
+    startup:
+      enabled: true
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      successThreshold: 1
+      failureThreshold: 25
+      httpGet:
+        scheme: HTTP
+        path: /.info/healthz
+        port: 8000
+    ## Liveness probe.
+    ##
+    liveness:
+      enabled: true
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 5
+      successThreshold: 1
+      failureThreshold: 5
+      httpGet:
+        scheme: HTTP
+        path: /.info/healthz
+        port: 8000
+        ## It is also possible to configure HTTP Headers in the following way.
+        ##
+        ## httpHeaders:
+        ## - name: Authorization
+        ##   value: *probeAuthorization
+    ## Readiness probe.
+    ##
+    readiness:
+      enabled: true
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 5
+      successThreshold: 1
+      failureThreshold: 5
+      httpGet:
+        scheme: HTTP
+        path: /.info/readyz
+        port: 8000
+        ## It is also possible to configure HTTP Headers in the following way.
+        ##
+        ## httpHeaders:
+        ## - name: Authorization
+        ##   value: *probeAuthorization
+## Xarta Core image.
+## ref: https://github.com/peinser/xarta/releases
+##
+image:
+  registry: ghcr.io
+  repository: peinser/xarta/core
+  tag: 0.0.10-dev
+  digest: ""
+  ## Specify a imagePullPolicy
+  ## Defaults to 'Always'
+  ## ref: https://kubernetes.io/docs/concepts/containers/images/#pre-pulled-images
+  ##
+  pullPolicy: Always
+  ## Optionally specify an array of imagePullSecrets.
+  ## Secrets must be manually created in the namespace.
+  ## ref: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
+  ## e.g:
+  ## pullSecrets:
+  ##   - myRegistryKeySecretName
+  ##
+  pullSecrets: []
+  ## Enable development (debug) mode.
+  ##
+  debug: false
+## Publicly-facing base-url of Xarta (including protocol.)
+## For instance: https://xarta.example.com
+##
+base: null
+## Database settings.
+##
+database:
+  # Disable only when every enabled database consumer uses an owner-specific pool.
+  legacyPostgresqlEnabled: true
+  ## PostgreSQL settings.
+  ##
+  postgresql:
+    user: null
+    database: null
+    password: null
+    host: null
+  ## Owner-specific settings override the shared local-development defaults.
+  trackingPostgresql: {}
+  docclePostgresql: {}
+  # Archive always uses a separate database, which may be hosted by the same server.
+  archivePostgresql:
+    database: xarta_archive
+## Cache settings.
+##
+cache:
+  ## DragonFly (Redis-clone) settings.
+  ##
+  dragonfly:
+    connectionString: null
+## NATS settings.
+##
+nats:
+  servers: null # Comma-seperated string of NATS replicas.
+## Optional OTLP/HTTP tracing. The Collector is managed outside this chart.
+##
+telemetry:
+  enabled: false
+  endpoint: null
+## Optional JSON temporary storage backend configuration. Existing Secrets must
+## provide temporary-storage.json. Without either setting, the tmp PVC is used.
+temporaryStorage:
+  existingSecret: null
+  config: null
+## Volume settings
+volumes:
+  archive:
+    existingClaim: null
+    path: /mnt/archive
+  bundle:
+    existingClaim: null
+    path: /mnt/bundle
+  tmp:
+    existingClaim: null
+    path: /mnt/tmp
+## Jobs used to initialize or maintain the state of Xarta core. Also includes
+## maintenance cronjobs which are configurable with a `schedule` (cron) pattern.
+jobs:
+  setupNats:
+    enabled: true
+  expireArchivedDocuments:
+    enabled: true
+    # The following runs the CronJob every 15 minutes by default.
+    schedule: "*/15 * * * *"
+  cleanupBundle:
+    enabled: true
+    # The following runs the CronJob every 15 minutes by default.
+    schedule: "*/15 * * * *"
+  cleanupGenerate:
+    enabled: true
+    # The following runs the CronJob every 15 minutes by default.
+    schedule: "*/15 * * * *"
+  replayDeadLetters:
+    enabled: true
+    # Process explicitly replay-safe dead letters at hours 00:00, 10:00, and 20:00.
+    schedule: "0 0,10,20 * * *"
+    batchSize: 100
+    maxAttempts: 3
+## Accessible services, optionally publically exposed. We allow the user
+## to individually customize the desired versions. Note that however,
+## the `latest` version is automatically enabled unless explicitely
+## disabled by the configuration.
+##
+services:
+  ## Archive service.
+  ##
+  archive:
+    enabled: true
+    replicas: 1
+    # Existing Secrets must provide archive.json.
+    existingSecret: null
+    settings:
+      timeout: 30.0 # Operations on the Xarta archive cannot take longer than this timeout.
+      adapters:
+        config: null
+      storage:
+        existingSecret: null
+        config: null
+        # Additional filesystem backends. Each entry requires name,
+        # existingClaim, and mountPath matching its storage configuration.
+        mounts: []
+      deletionReconciler:
+        enabled: true
+        batchSize: 100
+        concurrency: 25
+        scanSeconds: 5
+        ackWaitSeconds: 120
+        maxBackoffSeconds: 3600
+      nats:
+        workers: 10
+    ingress:
+      enabled: false
+  ## Bundle service.
+  ##
+  bundle:
+    enabled: true
+    replicas: 1
+    settings:
+      timeout: 30
+      nats:
+        workers: 10
+    ingress:
+      enabled: true
+  ## Document type service.
+  ##
+  documenttype:
+    enabled: true
+    replicas: 1
+    ingress:
+      enabled: false
+  ## Intake service.
+  ##
+  intake:
+    enabled: true
+    replicas: 1
+    x402:
+      enabled: false
+      facilitatorUrl: null
+      network: eip155:84532
+      payTo: null
+      paymentTimeoutSeconds: 60
+      intakeResourceUrl: null
+      # Existing Secret must provide challenge-signing-key.
+      challengeSigningSecretName: null
+      pricing:
+        # Existing ConfigMaps must provide pricing.json.
+        existingConfigMap: null
+        config: null
+    profiles:
+      # Recommended for GitOps: reference a content-addressed ConfigMap generated
+      # from reviewed profile JSON in the environment repository.
+      existingConfigMap: null
+      # Alternatively, provide the complete flow-profile configuration object.
+      config: null
+    ingress:
+      enabled: false
+  ## Model Context Protocol service for AI agents. Keep ingress disabled until
+  ## the deployment has caller authentication and tenant isolation.
+  ##
+  mcp:
+    enabled: true
+    replicas: 1
+    settings:
+      requestTimeoutSeconds: 30
+      archiveMaxResourceBytes: 4194304
+    ingress:
+      enabled: false
+  ## Preview service.
+  ##
+  preview:
+    enabled: true
+    replicas: 1
+    ingress:
+      enabled: false
+  ## Offline generation service.
+  ##
+  generate:
+    enabled: true
+    replicas: 1
+    settings:
+      nats:
+        workers: 10
+    ingress:
+      enabled: false
+  ## Document rendering service.
+  ##
+  render:
+    enabled: true
+    replicas: 1
+    settings:
+      timeout: 30
+    # Optional deployed template/configuration revision. Changing this value
+    # rolls every Xarta Render pool through normal GitOps reconciliation.
+    templateRevision: null
+    # Optional capacity reserved for synchronous Preview traffic. This pool
+    # runs the same image, command, and template-engine configuration.
+    previewPool:
+      enabled: false
+      replicas: 1
+    # Template engines reachable by the Render service. Each entry resolves to
+    # http://<release>-template-engine-<identifier>, optionally on `port`.
+    templateEngines:
+      - identifier: jinja
+        kind: jinja
+        timeout: 15.0
+      - identifier: scriptura-21
+        kind: scriptura
+        timeout: 15.0
+      - identifier: gotenberg
+        kind: gotenberg
+        timeout: 30.0
+        port: 3000
+    ingress:
+      enabled: false
+  ## Cryptographic signature service.
+  ##
+  signature:
+    enabled: true
+    replicas: 1
+    configuration:
+      existingConfigMap: null
+      config:
+        schema_version: 1
+        default_policy: xarta-dev-seal-v1
+        signer_identities:
+          local-dev-v1:
+            provider: local-pem
+        policies:
+          xarta-dev-seal-v1:
+            profile: legacy-pdf-cms
+            signer_identity: local-dev-v1
+            development_only: true
+          pades-b-b-v1:
+            profile: pades-b-b
+            signer_identity: local-dev-v1
+            digest_algorithm: sha256
+            development_only: true
+    # Optional RFC 3161 provider catalog. An existing ConfigMap must contain
+    # timestamp-providers.json and every public certificate path it references.
+    timestampProviders:
+      existingConfigMap: null
+      # Change when an externally managed fixed-name ConfigMap rotates.
+      existingConfigMapChecksum: null
+      config: null
+      # Public TSA leaf, intermediate, and trust-anchor PEM files keyed by filename.
+      trustMaterial: {}
+    settings:
+      adapter: local
+      allowDevelopmentPolicies: true
+      nats:
+        workers: 10
+      certificates:
+        b64PrivateKey: null
+        b64PublicKey: null
+        b64CertificateChain: null
+    ingress:
+      enabled: false
+  ## Webhook service for sending out HTTP calls.
+  ##
+  webhook:
+    enabled: true
+    replicas: 1
+    settings:
+      nats:
+        workers: 10
+  ## Tracked email delivery service.
+  ##
+  email:
+    enabled: true
+    replicas: 1
+    # Existing Secret must provide email.json.
+    existingSecret: null
+    # Change this value whenever an externally managed fixed-name Secret rotates.
+    # Content-addressed Secret names are preferred.
+    existingSecretChecksum: null
+    callbackIngress:
+      enabled: false
+    settings:
+      # Generic retained destination registry.
+      config:
+        sender@example.test:
+          kind: email
+          adapter: smtp
+          current_revision: v1
+          revisions:
+            v1:
+              password: PASSWORDHERE
+              server:
+                hostname: smtp.example.test
+                port: 587
+                start_tls: true
+      nats:
+        workers: 10
+      reconciliation:
+        batchSize: 100
+        concurrency: 10
+        intervalSeconds: 60
+        leaseSeconds: 120
+        maxBackoffSeconds: 3600
+  ## SFTP document delivery service.
+  ##
+  sftp:
+    enabled: false
+    replicas: 1
+    # Existing Secrets must provide sftp.json, known_hosts, and id_ed25519.
+    existingSecret: null
+    settings:
+      config: {}
+      knownHosts: null
+      b64PrivateKey: null
+      nats:
+        workers: 10
+  ## Optional tracked Peppol document delivery service.
+  ##
+  peppol:
+    enabled: false
+    replicas: 1
+    # Existing Secrets must provide peppol.json with retained destination revisions.
+    existingSecret: null
+    # Change this value whenever an externally managed fixed-name Secret rotates.
+    # Content-addressed Secret names are preferred.
+    existingSecretChecksum: null
+    settings:
+      config: {}
+      nats:
+        workers: 10
+    callbackIngress:
+      enabled: false
+  ## Optional tracked local postal production service. Station APIs are exposed
+  ## only by the chart's internal ClusterIP Service; no public ingress is created.
+  ##
+  postal:
+    enabled: false
+    replicas: 1
+    # Existing ConfigMaps must provide postal-destinations.json,
+    # postal-local-profiles.json, postal-bpost-profiles.json, and
+    # postal-local-capacity.json.
+    existingConfigMap: null
+    # Change when an externally managed fixed-name ConfigMap rotates.
+    existingConfigMapChecksum: null
+    # Existing Secrets must provide postal-local-stations.json and
+    # postal-local-storage.json.
+    existingSecret: null
+    # Change when an externally managed fixed-name Secret rotates.
+    existingSecretChecksum: null
+    settings:
+      destinations: null
+      localProfiles: null
+      # Non-secret provider products, policies, and tariffs.
+      bpostProfiles: null
+      capacity: null
+      stations: null
+      storage: null
+      nats:
+        workers: 10
+  ## Optional search indexing service. Archiving does not imply indexing.
+  search:
+    enabled: false
+    replicas: 1
+    existingSecret: null
+    settings:
+      config: {}
+      nats:
+        workers: 10
+  ## Optional Doccle delivery and receiver management service.
+  ##
+  doccle:
+    enabled: false
+    replicas: 1
+    # Existing Secrets must provide doccle.json, control-plane-token, and
+    # callback-certificate-fingerprints. Keep sender OAuth credentials in that Secret.
+    existingSecret: null
+    settings:
+      # Used only when existingSecret is not set.
+      controlPlaneToken: null
+      callbacks:
+        # Receiver link/unlink projection is independent and disabled by default.
+        enabled: false
+        # Comma-separated SHA-256 fingerprints used for callback mTLS validation.
+        certificateFingerprints: null
+      config: {}
+      nats:
+        workers: 10
+    ingress:
+      # Exposes only the bearer-protected Receiver control API.
+      enabled: false
+    callbackIngress:
+      # Exposes only the optional certificate-protected link/unlink callback.
+      enabled: false
+      # Secret containing ca.crt for Doccle callback client-certificate validation.
+      clientCertificateAuthoritySecret: null
+  ## QR service, for generating Xarta-specific QR codes.
+  ##
+  qr:
+    enabled: true
+    replicas: 1
+    settings:
+      timeout: 30
+    ingress:
+      enabled: false

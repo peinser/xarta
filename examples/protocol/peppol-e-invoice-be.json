@@ -1,0 +1,22 @@
+{
+  "id": "10000000-0000-0000-0000-000000000201",
+  "correlation_id": "20000000-0000-0000-0000-000000000201",
+  "dag": {
+    "id": "30000000-0000-0000-0000-000000000201",
+    "kind": "peppol",
+    "document": {
+      "source": "archive",
+      "id": "90000000-0000-0000-0000-000000000201",
+      "version": "91000000-0000-0000-0000-000000000201"
+    },
+    "on": {
+      "submitted": [{"id": "40000000-0000-0000-0000-000000000201", "kind": "debug"}],
+      "delivery_confirmed": [{"id": "41000000-0000-0000-0000-000000000201", "kind": "archive", "destination": "invoice-evidence", "documents": []}],
+      "delivery_failed": [{"id": "42000000-0000-0000-0000-000000000201", "kind": "webhook", "url": "https://example.com/billing-errors"}],
+      "recipient_not_registered": [{"id": "43000000-0000-0000-0000-000000000201", "kind": "webhook", "url": "https://example.com/billing-errors"}],
+      "invalid_document": [{"id": "44000000-0000-0000-0000-000000000201", "kind": "webhook", "url": "https://example.com/billing-errors"}],
+      "unsupported_profile": [{"id": "45000000-0000-0000-0000-000000000201", "kind": "debug"}],
+      "outcome_uncertain": [{"id": "46000000-0000-0000-0000-000000000201", "kind": "webhook", "url": "https://example.com/operations"}]
+    }
+  }
+}

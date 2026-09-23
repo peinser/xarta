@@ -1,0 +1,57 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "required": ["document_type", "payload"],
+    "properties": {
+      "document_type": {
+        "type": "string",
+        "description": "The type of the document, which can vary freely."
+      },
+      "content_type": {
+        "type": "string",
+        "description": "The content-type of the generated output. The template engine needs to support this."
+      },
+      "template_engine": {
+        "type": ["string", "null"],
+        "description": "The identifier of the template engine the user would like to use."
+      },
+      "template_engine_options": {
+        "type": ["object", "null"],
+        "description": "Optional configuration options for processing the document. Can vary freely.",
+        "additionalProperties": true
+      },
+      "parameters": {
+        "type": ["object", "null"],
+        "description": "Optional parameters which are tied to the template. Can vary freely.",
+        "additionalProperties": true
+      },
+      "metadata": {
+        "type": ["object", "null"],
+        "description": "Optional metadata tied to the generated document. Can vary freely. In the example of PDF's, the following keys can be used to set specific PDF parameters: title, author, subject, keywords, reator, producer, creationDate, modDate",
+        "additionalProperties": true
+      },
+      "payload": {
+        "type": "object",
+        "properties": {
+          "content_type": {
+            "type": "string",
+            "enum": ["application/json", "application/json+xml", "application/xml", "text/html", "text/markdown", "text/xml"]
+          },
+          "data": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": true
+              }
+            ]
+          }
+        },
+        "required": ["content_type", "data"],
+        "additionalProperties": true
+      }
+    },
+    "additionalProperties": false
+  }

@@ -1,0 +1,13 @@
+{
+  "default-search": {
+    "kind": "search-index",
+    "adapter": "elasticsearch",
+    "current_revision": "v1",
+    "revisions": {
+      "v1": {
+        "endpoint": "http://opensearch:9200",
+        "index": "documents"
+      }
+    }
+  }
+}

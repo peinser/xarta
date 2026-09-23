@@ -1,0 +1,49 @@
+# Doccle is disabled by default. This example references a separately managed
+# Secret so OAuth credentials and callback certificate fingerprints never enter
+# a ConfigMap or this values file.
+services:
+  doccle:
+    enabled: true
+    existingSecret: xarta-doccle-acc
+    settings:
+      callbacks:
+        enabled: true
+      nats:
+        workers: 10
+    ingress:
+      enabled: true
+    callbackIngress:
+      enabled: true
+      # Kubernetes TLS Secret containing ca.crt for Doccle's ACC callback CA.
+      clientCertificateAuthoritySecret: doccle-acc-callback-ca
+
+# Create xarta-doccle-acc out of band with these data keys:
+#
+# doccle.json: |
+#   {
+#     "current_sender": "acc-doccle",
+#     "senders": {
+#       "acc-doccle": {
+#         "adapter": "doccle-sender-rest",
+#         "current_revision": "acc-v1",
+#         "revisions": {
+#           "acc-v1": {
+#           "sender_name": "YOUR_ACCEPTED_DOCCLE_SENDER_NAME",
+#           "endpoint": "https://DOCCLE_ACC_SENDER_REST_ENDPOINT",
+#           "timeout": 30,
+#           "credentials": {
+#             "token_url": "DOCCLE_OIDC_TOKEN_URL",
+#             "client_id": "DOCCLE_CLIENT_ID",
+#             "client_secret": "DOCCLE_CLIENT_SECRET"
+#           },
+#           "document_types": {
+#             "invoice": "INVOICE",
+#             "reminder": "REMINDER"
+#           }
+#           }
+#         }
+#       }
+#     }
+#   }
+# control-plane-token: SECRET_BEARER_TOKEN
+# callback-certificate-fingerprints: SHA256_HEX_FINGERPRINT

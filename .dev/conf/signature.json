@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "default_policy": "xarta-dev-seal-v1",
+  "signer_identities": {
+    "local-dev-v1": {
+      "provider": "local-pem"
+    }
+  },
+  "policies": {
+    "xarta-dev-seal-v1": {
+      "profile": "legacy-pdf-cms",
+      "signer_identity": "local-dev-v1",
+      "development_only": true
+    },
+    "pades-b-b-v1": {
+      "profile": "pades-b-b",
+      "signer_identity": "local-dev-v1",
+      "digest_algorithm": "sha256",
+      "development_only": true
+    },
+    "pades-b-t-v1": {
+      "profile": "pades-b-t",
+      "signer_identity": "local-dev-v1",
+      "digest_algorithm": "sha256",
+      "timestamp_provider": "local-dev-tsa",
+      "development_only": true
+    }
+  }
+}

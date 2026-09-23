@@ -1,0 +1,210 @@
+base: https://xarta.example.test
+
+database:
+  postgresql:
+    user: xarta
+    database: xarta
+    password: ci-only-password
+    host: postgres
+  archivePostgresql:
+    user: xarta_archive
+    database: xarta_archive
+    password: ci-only-archive-password
+    host: postgres
+
+cache:
+  dragonfly:
+    connectionString: redis://cache:6379/0
+
+nats:
+  servers: nats://nats:4222
+
+volumes:
+  archive:
+    existingClaim: archive-ci
+  bundle:
+    existingClaim: bundle-ci
+  tmp:
+    existingClaim: tmp-ci
+
+services:
+  intake:
+    x402:
+      enabled: true
+      facilitatorUrl: https://facilitator.example.test
+      payTo: "0x0000000000000000000000000000000000000001"
+      challengeSigningSecretName: xarta-x402-challenge
+      pricing:
+        config:
+          revision: ci-v1
+          currency: USD
+          default_markup_multiplier: "1.25"
+          quote_ttl_seconds: 300
+          rates:
+            - capability: archive
+              adapter: xarta-http-archive
+              destination: default-archive
+              estimated_cost: "0.001"
+          bindings:
+            - capability: archive
+              destination: default-archive
+              adapter: xarta-http-archive
+              adapter_configuration_revision: v1
+    profiles:
+      config:
+        schema_version: 1
+        profiles:
+          ci-standard:
+            current_version: 1
+            versions:
+              "1":
+                description: CI profile
+                fingerprint: sha256:0b6d2126a36004aafea9ff521c61e5f0bfc47705c5fad3e4629a3de054cbf537
+                inputs: {}
+                dag:
+                  node_key: generate
+                  kind: generate
+                  documents: []
+  signature:
+    settings:
+      allowDevelopmentPolicies: true
+      certificates:
+        b64PrivateKey: Y2ktcHJpdmF0ZS1rZXk=
+        b64PublicKey: Y2ktcHVibGljLWtleQ==
+        b64CertificateChain: Y2ktY2VydGlmaWNhdGUtY2hhaW4=
+  email:
+    settings:
+      config:
+        billing@example.com:
+          kind: email
+          adapter: resend-rest
+          current_revision: v1
+          revisions:
+            v1:
+              base_url: https://api.resend.com
+              api_key: re_ci_only
+              webhook_secret: whsec_Y2ktb25seS1yZXNlbmQtd2ViaG9vay1zZWNyZXQ=
+              account_id: resend-ci-account
+              feedback_retention_seconds: 86400
+  postal:
+    enabled: true
+    settings:
+      destinations:
+        ci-local:
+          kind: postal
+          adapter: local
+          current_revision: ci-v1
+          revisions:
+            ci-v1:
+              execution_mode: tracked
+              local_profile: ci-letters-v1
+              capacity_pool: ci-letters
+      localProfiles:
+        profiles:
+          ci-letters-v1:
+            revision: ci-v1
+            site: ci-site
+            default_print:
+              color_mode: monochrome
+              sides: duplex_long_edge
+              document_boundary: continuous
+            paper_profile: a4-80gsm-v1
+            traveller_template_revision: ci-v1
+            physical:
+              sheet_weight_g: "4.99"
+              envelope_weight_g: "5.00"
+            provider:
+              adapter: bpost
+              profile: ci-stamps-v1
+      bpostProfiles:
+        profiles:
+          ci-stamps-v1:
+            revision: ci-v1
+            products:
+            - reference: prior-1
+              description: Synthetic CI Bpost Prior unit stamp
+            tariff:
+              revision: ci-v1
+              currency: EUR
+              unit_prices:
+                prior-1: "1.50"
+            policy:
+              revision: ci-v1
+              rules:
+              - service_type: ordinary
+                speed: priority
+                maximum_weight_g: "50"
+                supplies:
+                - reference: prior-1
+                  quantity: 1
+      capacity:
+        capacity_pools:
+          ci-letters:
+            timezone: Europe/Brussels
+            daily_admission_limit: -1
+            overflow: queue
+      stations:
+        stations:
+          ci-station:
+            site: ci-site
+            enabled: false
+            api_token: ci-placeholder-not-a-real-token
+      storage:
+        backend:
+          kind: filesystem
+          revision: ci-v1
+          path: /mnt/tmp/postal-local
+  sftp:
+    enabled: true
+    settings:
+      knownHosts: "sftp.example.test ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICIOnlyNotARealHostKey"
+      b64PrivateKey: Y2ktcHJpdmF0ZS1rZXk=
+      config:
+        partner-sftp:
+          kind: sftp
+          adapter: asyncssh-sftp
+          current_revision: partner-sftp-v1
+          revisions:
+            partner-sftp-v1:
+              host: sftp.example.test
+              port: 22
+              username: xarta
+              client_keys:
+                - /mnt/config/sftp/id_ed25519
+              known_hosts: /mnt/config/sftp/known_hosts
+              base_path: /incoming
+              create_directories: false
+              overwrite: false
+  search:
+    enabled: true
+    settings:
+      config:
+        documents:
+          kind: search-index
+          adapter: postgresql-search
+          current_revision: v1
+          revisions:
+            v1:
+              namespace: documents
+  doccle:
+    enabled: true
+    settings:
+      controlPlaneToken: ci-only-control-token
+      callbackCertificateFingerprints: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      config:
+        current_sender: ci-doccle
+        senders:
+          ci-doccle:
+            adapter: doccle-sender-rest
+            current_revision: ci-v1
+            revisions:
+              ci-v1:
+                sender_name: ci-sender
+                endpoint: https://doccle.example.test/sender-rest
+                timeout: 10
+                credentials:
+                  token_url: https://identity.example.test/oauth/token
+                  client_id: ci-only-client-id
+                  client_secret: ci-only-client-secret
+                document_types:
+                  invoice: INVOICE

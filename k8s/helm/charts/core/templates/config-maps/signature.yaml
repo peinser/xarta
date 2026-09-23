@@ -1,0 +1,40 @@
+{{- if .Values.services.signature.enabled }}
+{{- $configuration := .Values.services.signature.configuration }}
+{{- if and $configuration.existingConfigMap $configuration.config }}
+{{- fail "services.signature.configuration cannot set both existingConfigMap and config" }}
+{{- end }}
+{{- if not (or $configuration.existingConfigMap $configuration.config) }}
+{{- fail "services.signature.configuration requires existingConfigMap or config" }}
+{{- end }}
+{{- if $configuration.config }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-core-signature
+data:
+  signature.json: {{ $configuration.config | toJson | quote }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.services.signature.enabled }}
+{{- $timestamps := .Values.services.signature.timestampProviders }}
+{{- if and $timestamps.existingConfigMap $timestamps.config }}
+{{- fail "services.signature.timestampProviders cannot set both existingConfigMap and config" }}
+{{- end }}
+{{- if and $timestamps.trustMaterial (not $timestamps.config) }}
+{{- fail "services.signature.timestampProviders.trustMaterial requires config" }}
+{{- end }}
+{{- if $timestamps.config }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-core-timestamp-providers
+data:
+  timestamp-providers.json: {{ $timestamps.config | toJson | quote }}
+  {{- range $name, $contents := $timestamps.trustMaterial }}
+  {{ $name }}: |
+{{ $contents | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}

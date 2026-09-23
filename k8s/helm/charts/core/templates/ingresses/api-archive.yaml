@@ -1,0 +1,48 @@
+{{ if .Values.defaults.ingress.enabled }}
+
+{{- if .Values.services.archive.enabled }}
+{{- if .Values.services.archive.ingress.enabled }}
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    {{- include "ingress.defaultAnnotations" $ | indent 4 }}
+    nginx.ingress.kubernetes.io/proxy-body-size: 8m
+    nginx.ingress.kubernetes.io/proxy-buffering: "on"
+  name: {{ .Release.Name }}-api-archive
+spec:
+  ingressClassName: {{ .Values.defaults.ingress.ingressClassName | quote }}
+  tls:
+  - hosts:
+    {{- range $v := .Values.defaults.ingress.hosts }}
+    {{- if $v.tls }}
+    - {{ $v.dns | quote }}
+    {{- end }}
+    {{- end }}
+    secretName: {{ .Release.Name }}-ingress-tls
+  rules:
+  {{- range $v := .Values.defaults.ingress.hosts }}
+  - host: {{ $v.dns | quote }}
+    http:
+      paths:
+      - path: /api/archive
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ $.Release.Name }}-service-archive
+            port:
+              number: 80
+      - path: /api/v1/archive
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ $.Release.Name }}-service-archive
+            port:
+              number: 80
+  {{- end }}
+
+{{- end }}
+{{- end }}
+
+{{ end }}

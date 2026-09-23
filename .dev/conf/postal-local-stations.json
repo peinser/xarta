@@ -1,0 +1,9 @@
+{
+  "stations": {
+    "development-station": {
+      "site": "brussels",
+      "enabled": true,
+      "api_token": "development-postal-station-token"
+    }
+  }
+}

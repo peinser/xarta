@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY public.tracked_operations_resend_reconciliation_idx;

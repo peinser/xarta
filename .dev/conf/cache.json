@@ -1,0 +1,26 @@
+{
+    "in_memory": {
+        "cache": "aiocache.SimpleMemoryCache",
+        "serializer": {
+            "class": "aiocache.serializers.JsonSerializer"
+        }
+    },
+    "redis": {
+        "cache": "aiocache.RedisCache",
+        "endpoint": "cache",
+        "port": 6379,
+        "timeout": 2.5,
+        "serializer": {
+            "class": "aiocache.serializers.JsonSerializer"
+        }
+    },
+    "default": {
+        "cache": "aiocache.RedisCache",
+        "endpoint": "cache",
+        "port": 6379,
+        "timeout": 2.5,
+        "serializer": {
+            "class": "aiocache.serializers.JsonSerializer"
+        }
+    }
+}

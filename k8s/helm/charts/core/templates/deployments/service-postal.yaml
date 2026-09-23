@@ -1,0 +1,109 @@
+{{- if .Values.services.postal.enabled }}
+{{- $deployment := include "service.name" (dict "release" $.Release "name" "postal") -}}
+{{- $configMap := .Values.services.postal.existingConfigMap | default (printf "%s-core-postal" .Release.Name) -}}
+{{- $secret := .Values.services.postal.existingSecret | default (printf "%s-core-postal" .Release.Name) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: {{ $deployment }}
+    xarta-environment: {{ .Release.Name }}
+  name: {{ $deployment }}
+spec:
+  replicas: {{ include "deploy.replicas" .Values.services.postal }}
+  selector:
+    matchLabels:
+      app: {{ $deployment }}
+  template:
+    metadata:
+      annotations:
+        checksum-postal-config: {{ .Values.services.postal.existingConfigMapChecksum | default (include (print $.Template.BasePath "/config-maps/postal.yaml") . | sha256sum) | quote }}
+        checksum-postal-secret: {{ .Values.services.postal.existingSecretChecksum | default (include (print $.Template.BasePath "/secrets/postal.yaml") . | sha256sum) | quote }}
+        checksum-postgresql-owners: {{ include (print $.Template.BasePath "/secrets/postgresql-owners.yaml") . | sha256sum }}
+      labels:
+        app: {{ $deployment }}
+        xarta-environment: {{ .Release.Name }}
+        {{- if .Values.defaults.loki.enabled }}
+        loki: {{ .Values.defaults.loki.tenant }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+      {{- include "service.constraints" $ | nindent 6 }}
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: {{ .Values.defaults.restartPolicy }}
+      {{ include "service.pullSecrets" $ | nindent 6 -}}
+      volumes:
+      {{- include "temporaryStorage.volume" $ | nindent 6 }}
+      - name: postal-config
+        configMap:
+          name: {{ $configMap }}
+      - name: postal-secret
+        secret:
+          secretName: {{ $secret }}
+          defaultMode: 0400
+      containers:
+      - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ $deployment }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+        args: [
+          "services",
+          {{ if $.Values.image.debug -}}
+          --debug,
+          {{- end }}
+          "--run", "postal=latest",
+          "--run", "postal=v1"
+        ]
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+        volumeMounts:
+        {{- include "temporaryStorage.mount" $ | nindent 8 }}
+        - name: postal-config
+          readOnly: true
+          mountPath: /mnt/config/postal
+        - name: postal-secret
+          readOnly: true
+          mountPath: /mnt/secrets/postal
+        env:
+        {{- include "telemetry.env" (dict "root" $ "name" "postal") | nindent 8 }}
+        {{- include "tracking-postgresql.env" $ | nindent 8 }}
+        - name: NATS_SERVERS
+          value: {{ .Values.nats.servers | quote }}
+        - name: NATS_WORKERS
+          value: {{ .Values.services.postal.settings.nats.workers | default 10 | quote }}
+        {{- include "temporaryStorage.env" $ | nindent 8 }}
+        - name: POSTAL_CONFIGURATIONS_CONFIG_PATH
+          value: /mnt/config/postal/postal-destinations.json
+        - name: POSTAL_LOCAL_PROFILES_CONFIG_PATH
+          value: /mnt/config/postal/postal-local-profiles.json
+        - name: POSTAL_BPOST_PROFILES_CONFIG_PATH
+          value: /mnt/config/postal/postal-bpost-profiles.json
+        - name: POSTAL_LOCAL_CAPACITY_CONFIG_PATH
+          value: /mnt/config/postal/postal-local-capacity.json
+        - name: POSTAL_LOCAL_STATIONS_CONFIG_PATH
+          value: /mnt/secrets/postal/postal-local-stations.json
+        - name: POSTAL_LOCAL_STORAGE_CONFIG_PATH
+          value: /mnt/secrets/postal/postal-local-storage.json
+        - name: ARCHIVE_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "archive") }}/api/archive
+        - name: ARCHIVE_SERVICE_TIMEOUT
+          value: {{ .Values.services.archive.settings.timeout | default 10 | quote }}
+        - name: BUNDLE_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "bundle") }}/api/bundle
+        - name: BUNDLE_SERVICE_TIMEOUT
+          value: {{ .Values.services.bundle.settings.timeout | default 10 | quote }}
+        - name: RENDER_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "render") }}/api/render
+        - name: RENDER_SERVICE_TIMEOUT
+          value: {{ .Values.services.render.settings.timeout | default 10 | quote }}
+        {{- include "resources" $ | nindent 8 }}
+        {{- include "probes" $ | nindent 8 }}
+{{- end }}

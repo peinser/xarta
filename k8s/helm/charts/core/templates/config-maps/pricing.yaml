@@ -1,0 +1,19 @@
+{{- $x402 := .Values.services.intake.x402 -}}
+{{- $pricing := $x402.pricing -}}
+{{- if and $x402.enabled $pricing.existingConfigMap $pricing.config }}
+{{- fail "services.intake.x402.pricing cannot set both existingConfigMap and config" }}
+{{- end }}
+{{- if and $x402.enabled (not (or $pricing.existingConfigMap $pricing.config)) }}
+{{- fail "enabled services.intake.x402 requires pricing configuration" }}
+{{- end }}
+{{- if and $x402.enabled $pricing.config }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-core-pricing
+  labels:
+    app: {{ .Release.Name }}-core-intake
+    xarta-environment: {{ .Release.Name }}
+data:
+  pricing.json: {{ $pricing.config | toJson | quote }}
+{{- end }}

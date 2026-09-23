@@ -1,0 +1,35 @@
+{{- $job :=  printf "%s-cache" .Release.Name -}}
+{{- $endpoint := printf "%s-dragonfly" .Release.Name -}}
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $job }}
+data:
+  cache.json: |
+    {
+      "in_memory": {
+        "cache": "aiocache.SimpleMemoryCache",
+        "serializer": {
+          "class": "aiocache.serializers.JsonSerializer"
+        }
+      },
+      "redis": {
+        "cache": "aiocache.RedisCache",
+        "endpoint": "{{ $endpoint }}",
+        "port": 6379,
+        "timeout": 2.5,
+        "serializer": {
+          "class": "aiocache.serializers.JsonSerializer"
+        }
+      },
+      "default": {
+        "cache": "aiocache.RedisCache",
+        "endpoint": "{{ $endpoint }}",
+        "port": 6379,
+        "timeout": 2.5,
+        "serializer": {
+          "class": "aiocache.serializers.JsonSerializer"
+        }
+      }
+    }

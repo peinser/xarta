@@ -1,0 +1,24 @@
+{
+  "current_sender": "dev-sender",
+  "senders": {
+    "dev-sender": {
+      "adapter": "doccle-sender-rest",
+      "current_revision": "dev-v1",
+      "revisions": {
+        "dev-v1": {
+        "sender_name": "replace-with-doccle-sender-name",
+        "endpoint": "https://stg-webservice.doccle.be/mci-rest-app/rest/mci/external",
+        "timeout": 10,
+        "credentials": {
+          "token_url": "https://example.test/oauth/token",
+          "client_id": "replace-with-doccle-client-id",
+          "client_secret": "replace-with-doccle-client-secret"
+        },
+        "document_types": {
+          "invoice": "INVOICE"
+        }
+        }
+      }
+    }
+  }
+}

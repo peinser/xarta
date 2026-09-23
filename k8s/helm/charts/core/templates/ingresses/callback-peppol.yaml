@@ -1,0 +1,46 @@
+{{- if and .Values.defaults.ingress.enabled .Values.services.peppol.enabled .Values.services.peppol.callbackIngress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    {{- include "ingress.defaultAnnotations" $ | indent 4 }}
+    nginx.ingress.kubernetes.io/proxy-body-size: 64k
+  name: {{ .Release.Name }}-callback-peppol
+spec:
+  ingressClassName: {{ .Values.defaults.ingress.ingressClassName | quote }}
+  tls:
+  - hosts:
+    {{- range $v := .Values.defaults.ingress.hosts }}
+    {{- if $v.tls }}
+    - {{ $v.dns | quote }}
+    {{- end }}
+    {{- end }}
+    secretName: {{ .Release.Name }}-ingress-tls
+  rules:
+  {{- range $v := .Values.defaults.ingress.hosts }}
+  - host: {{ $v.dns | quote }}
+    http:
+      paths:
+      - path: /api/peppol/callbacks/e-invoice-be
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ $.Release.Name }}-service-peppol
+            port:
+              number: 80
+      - path: /api/v1/peppol/callbacks/e-invoice-be
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ $.Release.Name }}-service-peppol
+            port:
+              number: 80
+      - path: /api/v1/peppol/callbacks/recommand
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ $.Release.Name }}-service-peppol
+            port:
+              number: 80
+  {{- end }}
+{{- end }}

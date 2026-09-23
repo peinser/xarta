@@ -1,0 +1,74 @@
+{{- if .Values.services.preview.enabled }}
+
+{{- $deployment := include "service.name" (dict "release" $.Release "name" "preview") -}}
+{{- $renderService := "render" -}}
+{{- if .Values.services.render.previewPool.enabled -}}
+{{- $renderService = "render-preview" -}}
+{{- end -}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: {{ $deployment }}
+    xarta-environment: {{ .Release.Name }}
+  name: {{ $deployment }}
+spec:
+  replicas: {{ include "deploy.replicas" .Values.services.preview }}
+  selector:
+    matchLabels:
+      app: {{ $deployment }}
+  template:
+    metadata:
+      labels:
+        app: {{ $deployment }}
+        xarta-environment: {{ .Release.Name }}
+        {{- if .Values.defaults.loki.enabled }}
+        loki: {{ .Values.defaults.loki.tenant }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+
+      {{- include "service.constraints" $ | nindent 6 }}
+
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: {{ .Values.defaults.restartPolicy }}
+      {{ include "service.pullSecrets" $ | nindent 6 -}}
+
+      containers:
+
+      - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ $deployment }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+        args: [
+          "services",
+          {{ if $.Values.image.debug -}}
+          --debug,
+          {{- end }}
+          "--run", "preview=latest",
+          "--run", "preview=v1"
+        ]
+
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+
+        env:
+        {{- include "telemetry.env" (dict "root" $ "name" "preview") | nindent 8 }}
+        - name: RENDER_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" $renderService) }}/api/render
+        - name: RENDER_SERVICE_TIMEOUT
+          value: {{ .Values.services.render.settings.timeout | default 10 | quote }}
+
+        {{- include "resources" $ | nindent 8 }}
+        {{- include "probes" $ | nindent 8 }}
+
+{{- end }}

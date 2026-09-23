@@ -1,0 +1,23 @@
+{
+  "profiles": {
+    "brussels-letters-v1": {
+      "revision": "development-v1",
+      "site": "brussels",
+      "default_print": {
+        "color_mode": "monochrome",
+        "sides": "duplex_long_edge",
+        "document_boundary": "continuous"
+      },
+      "paper_profile": "a4-80gsm-v1",
+      "traveller_template_revision": "development-v1",
+      "physical": {
+        "sheet_weight_g": "4.99",
+        "envelope_weight_g": "5.00"
+      },
+      "provider": {
+        "adapter": "bpost",
+        "profile": "development-stamps-v1"
+      }
+    }
+  }
+}

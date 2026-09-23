@@ -1,0 +1,22 @@
+{
+  "adapter": "e-invoice-be-rest",
+  "current_revision": "development-v1",
+  "revisions": {
+    "development-v1": {
+      "base_url": "https://api.e-invoice.be",
+      "tenants": [
+        {
+          "tenant_id": "replace-with-e-invoice-be-tenant-id",
+          "api_key": "replace-with-e-invoice-be-api-key",
+          "webhook_secret": "replace-with-e-invoice-be-webhook-secret",
+          "peppol_ids": [
+            {
+              "scheme": "0208",
+              "identifier": "replace-with-enterprise-number"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

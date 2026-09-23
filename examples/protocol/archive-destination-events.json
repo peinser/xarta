@@ -1,0 +1,13 @@
+{
+  "steps": [
+    {
+      "name": "archive_adapter_accepts",
+      "expected_binding": {
+        "destination": "archive-abc123",
+        "adapter": "archive-adapter-a",
+        "configuration_revision": "archive-a-v1"
+      },
+      "expected_node_execution_state": "waiting_feedback"
+    }
+  ]
+}

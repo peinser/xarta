@@ -1,0 +1,9 @@
+{{- if and .Values.services.render.previewPool.enabled (not .Values.services.render.enabled) -}}
+{{- fail "services.render.previewPool requires services.render.enabled=true" -}}
+{{- end -}}
+{{- if and .Values.services.render.previewPool.enabled (not .Values.services.preview.enabled) -}}
+{{- fail "services.render.previewPool requires services.preview.enabled=true" -}}
+{{- end -}}
+{{- if and .Values.services.render.previewPool.enabled (le (int .Values.services.render.previewPool.replicas) 0) -}}
+{{- fail "services.render.previewPool.replicas must be greater than zero" -}}
+{{- end -}}

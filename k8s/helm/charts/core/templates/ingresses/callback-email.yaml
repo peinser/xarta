@@ -1,0 +1,39 @@
+{{- if and .Values.defaults.ingress.enabled .Values.services.email.enabled .Values.services.email.callbackIngress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    {{- include "ingress.defaultAnnotations" $ | indent 4 }}
+    nginx.ingress.kubernetes.io/proxy-body-size: 256k
+  name: {{ .Release.Name }}-callback-email
+spec:
+  ingressClassName: {{ .Values.defaults.ingress.ingressClassName | quote }}
+  tls:
+  - hosts:
+    {{- range $v := .Values.defaults.ingress.hosts }}
+    {{- if $v.tls }}
+    - {{ $v.dns | quote }}
+    {{- end }}
+    {{- end }}
+    secretName: {{ .Release.Name }}-ingress-tls
+  rules:
+  {{- range $v := .Values.defaults.ingress.hosts }}
+  - host: {{ $v.dns | quote }}
+    http:
+      paths:
+      - path: /api/email/callbacks/resend
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ $.Release.Name }}-service-email
+            port:
+              number: 80
+      - path: /api/v1/email/callbacks/resend
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ $.Release.Name }}-service-email
+            port:
+              number: 80
+  {{- end }}
+{{- end }}

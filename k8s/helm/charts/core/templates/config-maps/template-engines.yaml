@@ -1,0 +1,17 @@
+{{- $deployment := include "service.name" (dict "release" $.Release "name" "render") -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $deployment }}
+data:
+  template-engines.json: |
+    {
+      {{- $length := len $.Values.services.render.templateEngines }}
+      {{- range $i, $v := $.Values.services.render.templateEngines }}
+      "{{ $v.identifier }}": {
+        "kind": "{{ $v.kind }}",
+        "timeout": {{ $v.timeout | default 10.0 }},
+        "endpoint": "http://{{ $.Release.Name }}-template-engine-{{ $v.identifier }}{{ with $v.port }}:{{ . }}{{ end }}"
+      }{{ if lt (add1 $i) $length }},{{ end }}
+      {{- end -}}
+    }

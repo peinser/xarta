@@ -1,0 +1,105 @@
+name: Release & Tag
+
+permissions:
+  contents: write
+
+run-name: ${{ github.actor }} is creating a release tag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        type: choice
+        description: Select the type of next release.
+        default: patch
+        options:
+        - patch
+        - minor
+        - major
+
+jobs:
+
+  release-versioning:
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: 'Checkout Repository'
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        version: "0.8.17"
+
+    - name: Configure Git
+      run: |
+        git config --global user.name "${GITHUB_ACTOR}"
+        git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+
+    - name: Determine Next Version
+      id: versioning
+      run: |
+        current_version=$(cat VERSION)
+
+        # Get release type from input
+        release_type="${{ inputs.release_type }}"
+
+        # Use semver tool to determine next version based on input
+        release_version=$(./tools/semver bump release "$current_version")
+        next_version=$(./tools/semver bump "$release_type" "$current_version")-dev
+
+        # Expose next version as output
+        echo "release_version=$release_version" >> "$GITHUB_OUTPUT"
+        echo "next_version=$next_version" >> "$GITHUB_OUTPUT"
+
+    - name: Update Version Files
+      run: |
+        v=${{ steps.versioning.outputs.release_version }}
+
+        # Update VERSION file
+        echo "$v" > VERSION
+
+        # Update pyproject.toml and uv.lock
+        uv version --no-sync "$v"
+
+        # Update Helm chart versioning
+        for chart in k8s/helm/charts/*/Chart.yaml; do
+          yq eval ".version = \"$v\"" -i "$chart"
+          yq eval ".appVersion = \"$v\"" -i "$chart"
+        done
+
+        for values in k8s/helm/charts/*/values.yaml; do
+          yq eval ".image.tag = \"$v\"" -i "$values"
+        done
+
+        git add --all
+        git commit -m "Release $v"
+        tag="release/$v"
+        git tag -a "$tag" -m "Release $v"
+        git push origin --tags
+
+        # Set the next development version.
+        v=${{ steps.versioning.outputs.next_version }}
+
+        # Update VERSION file
+        echo "$v" > VERSION
+
+        # Update pyproject.toml and uv.lock
+        uv version --no-sync "$v"
+
+        # Update Helm chart versioning
+        for chart in k8s/helm/charts/*/Chart.yaml; do
+          yq eval ".version = \"$v\"" -i "$chart"
+          yq eval ".appVersion = \"$v\"" -i "$chart"
+        done
+
+        for values in k8s/helm/charts/*/values.yaml; do
+          yq eval ".image.tag = \"$v\"" -i "$values"
+        done
+
+        git add --all
+        git commit -m "Set next development version"
+        git push origin

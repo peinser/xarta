@@ -1,0 +1,20 @@
+{
+  "steps": [
+    {
+      "name": "document_uploaded",
+      "expected_outcomes": [
+        {
+          "outcome": "uploaded",
+          "subject": {
+            "kind": "document",
+            "id": "93000000-0000-0000-0000-000000000001"
+          }
+        }
+      ],
+      "expected_node_execution_state": "resolved",
+      "expected_scheduled_node_ids": [
+        "43000000-0000-0000-0000-000000000001"
+      ]
+    }
+  ]
+}

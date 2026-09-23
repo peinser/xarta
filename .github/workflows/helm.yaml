@@ -1,0 +1,98 @@
+name: Build & Distribute Helm charts
+
+permissions:
+  contents: read
+  packages: write
+
+run-name: ${{ github.actor }} is building new Helm charts and distributing them to the container registry.
+
+on:
+  workflow_dispatch:
+    inputs:
+      all:
+        description: All charts?
+        type: boolean
+        required: false
+        default: true
+  push:
+    paths:
+    - k8s/helm/charts/*/templates/**
+    - k8s/helm/charts/*/values.yaml
+    - k8s/helm/charts/*/Chart.yaml
+    - k8s/helm/ci/**
+    - Makefile
+    tags:
+    - release/**
+
+jobs:
+
+  package:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout the current Git repository.
+    - name: 'Git Checkout'
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    # Configure Helm
+    - name: 'Configure & Install Helm'
+      uses: azure/setup-helm@v4
+      with:
+      # Install specific Helm version because Helm 3.14 is FUBAR
+      # See: https://github.com/helm/helm/issues/12748
+        version: '3.13.3'
+
+    # Authorize with the configured container registry hosting the OCI charts.
+    - name: 'Authorize with the OCI container registry'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        echo "$GITHUB_TOKEN" | helm registry login --username "$GITHUB_ACTOR" --password-stdin ghcr.io
+
+    - name: 'Install kubeconform'
+      env:
+        KUBECONFORM_VERSION: v0.7.0
+      run: |
+        curl -fsSLo "$RUNNER_TEMP/kubeconform.tar.gz" \
+          "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+        tar -xzf "$RUNNER_TEMP/kubeconform.tar.gz" -C "$RUNNER_TEMP" kubeconform
+        install -m 0755 "$RUNNER_TEMP/kubeconform" /usr/local/bin/kubeconform
+
+    - name: 'Verify Helm charts'
+      run: make helm-verify
+
+    # Package the repository
+    - name: 'Package & Update Helm Repository'
+      run: |
+        # Show the Helm version for debugging purposes.
+        helm version
+
+        # Note: we filter the connect evolution chart as other charts (dependencies) have to be released first.
+        # Check if _ALL_ Helm charts have to be released.
+        echo "Finding charts that have to be released..."
+        if [[ "${{ inputs.all }}" == "true" ]]; then
+          charts=$(find k8s/helm/charts -type d -maxdepth 1 -mindepth 1)
+        else
+          charts=$(git diff --name-only HEAD~1 | xargs --no-run-if-empty dirname | sort | uniq | { grep charts || true; } | { grep -v /templates || true; } | { grep -v /resources || true; })
+        fi
+
+        # Create a temporary directory to store the packaged helm files.
+        mkdir -p '_packaged/'
+
+        # Extract the modified charts based on the commited change.
+        echo "Packaging charts..."
+        echo "$charts" | grep -v "^$" | while read line || [[ -n $line ]];
+        do
+          echo "Packaging $line"
+          helm package --dependency-update $line -d _packaged/
+        done
+
+        # Push the charts that have been packaged.
+        echo "Pushing Helm charts to the OCI repository..."
+        ls _packaged | grep .tgz | while read line || [[ -n $line ]];
+        do
+          helm push _packaged/$line oci://ghcr.io/peinser/xarta/charts
+          echo ":arrow_up: Pushed $line" >> $GITHUB_STEP_SUMMARY
+        done

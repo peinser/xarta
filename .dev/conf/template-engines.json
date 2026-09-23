@@ -1,0 +1,17 @@
+{
+    "jinja": {
+        "endpoint": "http://template-engine-jinja:8000",
+        "timeout": 10.0,
+        "kind": "jinja"
+    },
+    "scriptura-21": {
+        "endpoint": "http://template-engine-scriptura:13542",
+        "timeout": 30.0,
+        "kind": "scriptura"
+    },
+    "gotenberg": {
+        "endpoint": "http://template-engine-gotenberg:3000",
+        "timeout": 30.0,
+        "kind": "gotenberg"
+    }
+}

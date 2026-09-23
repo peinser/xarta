@@ -1,0 +1,7 @@
+{
+  "backend": {
+    "kind": "filesystem",
+    "revision": "development-v1",
+    "path": ".dev/runtime/postal-local-storage"
+  }
+}

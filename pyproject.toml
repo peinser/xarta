@@ -1,0 +1,145 @@
+[build-system]
+  build-backend = 'uv_build'
+  requires = ['uv_build>=0.8.17,<0.9.0']
+
+[project]
+  authors = [{name = 'Joeri Hermans', email = 'joeri@peinser.com'}]
+  dependencies = [
+    'aiobotocore>=3.9,<4',
+    'aiocache[redis]>=0.12.3,<0.13',
+    'aiodns>=4,<5',
+    'aiofiles>=25,<26',
+    'aiohttp>=3.9.3,<4',
+    'aioquic>=1.2.0,<2',
+    'aiosmtplib>=5,<6',
+    'async-lru>=2.0.4,<3',
+    'asyncpg>=0.31,<0.32',
+    'asyncssh>=2.24,<3',
+    'bcrypt>=5,<6',
+    'brotli>=1.1.0,<2',
+    'cryptography>=50,<51',
+    'isodate>=0.7,<0.8',
+    'jsonschema>=4.21.1,<5',
+    'jwcrypto>=1.5.6,<2',
+    'lxml>=6,<7',
+    'mcp==2.1.1',
+    'nats-py>=2.15.0,<3',
+    "opentelemetry-api>=1.44,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.44,<2",
+    "opentelemetry-instrumentation-aiohttp-client>=0.65b0,<1",
+    "opentelemetry-sdk>=1.44,<2",
+    'orjson>=3.9.12,<4',
+    'pyhanko[image-support,opentype]>=0.36,<0.37',
+    'pyjwt>=2.8.0,<3',
+    'python-barcode>=0.16,<0.17',
+    'python-dateutil>=2.9.0.post0,<3',
+    'pytz>=2026,<2027',
+    'qrcode>=8.0,<9',
+    'sanic>=25,<26',
+    'structlog>=26,<27',
+    'uvloop>=0.22,<0.23',
+    'websockets>=17,<18',
+    "x402[evm]==2.21.0",
+    'xmltodict>=1,<2',
+]
+  description = 'Asynchronous document generation and workflow services'
+  license = 'AGPL-3.0-only'
+  license-files = ['LICENSE']
+  name = 'xarta'
+  readme = 'README.md'
+  requires-python = '>=3.11,<3.14'
+  version = '0.0.10-dev'
+
+[dependency-groups]
+  dev = [
+    'bandit>=1.7.5,<2',
+    'black>=26,<27',
+    'bpython>=0.26,<0.27',
+    'mypy>=2,<3',
+    'pytest>=9,<10',
+    'pytest-asyncio>=1,<2',
+    'pytest-cov>=7,<8',
+    'ruff>=0.16,<0.17',
+    'safety>=3,<4',
+    'towncrier>=25,<26',
+  ]
+
+[tool]
+  [tool.coverage]
+    [tool.coverage.report]
+      exclude_lines = ['pragma: no cover', 'if TYPE_CHECKING:', 'raise NotImplementedError']
+      fail_under = 75
+      show_missing = true
+
+    [tool.coverage.run]
+      branch = true
+      omit = ['src/frontend', 'src/xarta/__init__.py', 'src/xarta/__version__.py']
+
+  [tool.mypy]
+    check_untyped_defs = true
+    disallow_any_unimported = false
+    disallow_untyped_defs = false
+    files = [
+      'src/xarta/tracking',
+      'src/xarta/pricing',
+      'src/xarta/payments',
+      'src/xarta/mcp',
+      'src/xarta/flow_profiles',
+      'src/xarta/services/v1/intake',
+      'src/xarta/services/v1/doccle',
+      'src/xarta/services/v1/peppol',
+      'src/xarta/services/v1/postal',
+      'apps/postal-station/src/postal_station',
+    ]
+    no_implicit_optional = true
+    pretty = true
+    show_error_codes = true
+    strict = false
+    warn_return_any = true
+    warn_unused_ignores = true
+
+  [tool.ruff]
+    extend-exclude = ['docs/*', 'tests/fixtures/exceptions/*']
+    fix = false
+    line-length = 120
+    target-version = 'py311'
+
+    [tool.ruff.lint]
+      extend-select = ['B', 'C4', 'ERA', 'I', 'N', 'PIE', 'PGH', 'RUF', 'SIM', 'TCH', 'TID', 'UP']
+      ignore = [
+        'B006', 'B008', 'B904', 'BLE001', 'E402', 'E722', 'F401',
+        'FLY002', 'FURB192', 'N818', 'N814', 'PLR1704', 'PYI034',
+        'PYI036', 'RUF043', 'RUF059', 'SIM102', 'SIM117', 'TC001',
+        'TC002', 'TC003', 'TC006', 'TID252', 'TRY004',
+      ]
+      unfixable = ['ERA']
+
+    [tool.ruff.lint.flake8-tidy-imports]
+      ban-relative-imports = 'all'
+
+    [tool.ruff.lint.isort]
+      force-single-line = true
+      known-first-party = []
+      lines-between-types = 1
+      required-imports = ['from __future__ import annotations']
+
+  [tool.towncrier]
+    directory = '.changelog'
+    filename = 'CHANGELOG.md'
+    name = 'xarta'
+    package = 'xarta'
+    package_dir = 'src'
+    title_format = '{version} ({project_date})'
+
+  [tool.pytest.ini_options]
+    asyncio_mode = 'auto'
+    markers = [
+      'doccle_acc: opt-in contract tests against the side-effecting Doccle ACC environment',
+      'e_invoice_be_contract: opt-in contract tests against an e-invoice.be sandbox workspace',
+      'gotenberg_contract: opt-in contract tests against a running Gotenberg instance',
+      'jinja_contract: opt-in contract tests against a running Jinja/Xarta environment',
+      'resend_contract: opt-in contract tests against a real Resend test account',
+      'recommand_contract: opt-in contract tests against an isolated Recommand playground',
+    ]
+    pythonpath = ['apps/postal-station/src']
+    testpaths = ['tests', 'apps/postal-station/tests']

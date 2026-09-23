@@ -1,0 +1,12 @@
+{{- if and .Values.services.postal.enabled (not .Values.services.postal.existingConfigMap) }}
+{{- $settings := .Values.services.postal.settings }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-core-postal
+data:
+  postal-destinations.json: {{ required "services.postal.settings.destinations is required" $settings.destinations | toJson | quote }}
+  postal-local-profiles.json: {{ required "services.postal.settings.localProfiles is required" $settings.localProfiles | toJson | quote }}
+  postal-bpost-profiles.json: {{ required "services.postal.settings.bpostProfiles is required" $settings.bpostProfiles | toJson | quote }}
+  postal-local-capacity.json: {{ required "services.postal.settings.capacity is required" $settings.capacity | toJson | quote }}
+{{- end }}

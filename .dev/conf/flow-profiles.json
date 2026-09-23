@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "development-standard": {
+      "current_version": 1,
+      "versions": {
+        "1": {
+          "description": "Development-only example profile",
+          "fingerprint": "sha256:3db653ad661e010cd6c13b73820e3c0ea34b1d6ec311756c961ffc69ceb003f3",
+          "inputs": {
+            "document": {
+              "type": "document-source",
+              "allowed_sources": ["generate"]
+            }
+          },
+          "dag": {
+            "node_key": "archive-document",
+            "kind": "archive",
+            "destination": "default-archive",
+            "documents": [
+              {
+                "document_type": null,
+                "metadata": {},
+                "representations": [{"source": {"$input": "document"}}]
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

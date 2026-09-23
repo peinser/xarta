@@ -1,0 +1,5 @@
+database:
+  postgresql:
+    connectionString: dev:dev@postgres/dev
+  archivePostgresql:
+    connectionString: dev:dev@postgres/archive

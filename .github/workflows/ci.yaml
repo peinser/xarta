@@ -1,0 +1,147 @@
+name: CI
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+  push:
+    branches: [main, development]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dev
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dev -d dev"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TRACKING_POSTGRES_TEST_DSN: postgresql://dev:dev@localhost:5432/dev
+    steps:
+      - name: Git checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.17"
+          enable-cache: true
+      - name: Install Python
+        run: uv python install 3.13
+      - name: Install dependencies
+        run: uv sync --frozen --all-groups
+      - name: Verify immutable flow profile history
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if git cat-file -e "${BASE_SHA}:examples/configuration/flow-profile-lock.json" 2>/dev/null; then
+            git show "${BASE_SHA}:examples/configuration/flow-profile-lock.json" > /tmp/flow-profile-lock-baseline.json
+            uv run --frozen python -m xarta.flow_profiles check-lock-history examples/configuration/flow-profile-lock.json /tmp/flow-profile-lock-baseline.json
+          fi
+      - name: Deploy tracking schema
+        env:
+          PGPASSWORD: dev
+        run: psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/deploy/00007.tracked-capabilities.sql
+      - name: Deploy execution lease schema
+        env:
+          PGPASSWORD: dev
+        run: psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/deploy/00012.execution-attempt-leases.sql
+      - name: Deploy Doccle schema
+        env:
+          PGPASSWORD: dev
+        run: psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/deploy/00014.doccle-persistence.sql
+      - name: Deploy runtime and Doccle hardening schemas
+        env:
+          PGPASSWORD: dev
+        run: |
+          psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/deploy/00015.node-execution-identity.sql
+          psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/deploy/00016.doccle-receiver-hardening.sql
+          psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/deploy/00017.provider-account-references.sql
+          psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/deploy/00018.payments.sql
+          psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/deploy/00019.resend-email-reconciliation.sql
+      - name: Verify tracking schema
+        env:
+          PGPASSWORD: dev
+        run: psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/verify/00007.tracked-capabilities.sql
+      - name: Verify Doccle schema
+        env:
+          PGPASSWORD: dev
+        run: psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/verify/00014.doccle-persistence.sql
+      - name: Verify runtime and Doccle hardening schemas
+        env:
+          PGPASSWORD: dev
+        run: |
+          psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/verify/00015.node-execution-identity.sql
+          psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/verify/00016.doccle-receiver-hardening.sql
+          psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/verify/00017.provider-account-references.sql
+          psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/verify/00018.payments.sql
+          psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/verify/00019.resend-email-reconciliation.sql
+      - name: Replace payment ledger with workflow provenance
+        env:
+          PGPASSWORD: dev
+        run: |
+          psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/deploy/00024.blockchain-payment-authority.sql
+          psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/verify/00024.blockchain-payment-authority.sql
+      - name: Deploy direct successor routing schema
+        env:
+          PGPASSWORD: dev
+        run: psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/deploy/00021.direct-successor-routing.sql
+      - name: Verify direct successor routing schema
+        env:
+          PGPASSWORD: dev
+        run: psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/verify/00021.direct-successor-routing.sql
+      - name: Verify
+        run: make verify
+
+  helm:
+    name: Helm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Git checkout
+        uses: actions/checkout@v4
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.17.3"
+      - name: Install kubeconform
+        env:
+          KUBECONFORM_VERSION: v0.7.0
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/kubeconform.tar.gz" \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          tar -xzf "$RUNNER_TEMP/kubeconform.tar.gz" -C "$RUNNER_TEMP" kubeconform
+          install -m 0755 "$RUNNER_TEMP/kubeconform" /usr/local/bin/kubeconform
+      - name: Verify charts
+        run: make helm-verify
+
+  container:
+    name: Container
+    runs-on: ubuntu-latest
+    steps:
+      - name: Git checkout
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build validation target
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/core/Dockerfile
+          target: validate
+          push: false

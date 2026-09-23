@@ -1,0 +1,22 @@
+{
+  "revision": "development-v1",
+  "currency": "USD",
+  "default_markup_multiplier": "1.25",
+  "quote_ttl_seconds": 300,
+  "rates": [
+    {
+      "capability": "archive",
+      "adapter": "xarta-http-archive",
+      "destination": "default-archive",
+      "estimated_cost": "0.001"
+    }
+  ],
+  "bindings": [
+    {
+      "capability": "archive",
+      "destination": "default-archive",
+      "adapter": "xarta-http-archive",
+      "adapter_configuration_revision": "v1"
+    }
+  ]
+}

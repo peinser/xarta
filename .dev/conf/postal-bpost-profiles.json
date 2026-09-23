@@ -1,0 +1,31 @@
+{
+  "profiles": {
+    "development-stamps-v1": {
+      "revision": "development-v1",
+      "products": [
+        {"reference": "prior-1", "description": "Synthetic Bpost Prior unit stamp"},
+        {"reference": "non-prior-1", "description": "Synthetic Bpost Non Prior unit stamp"},
+        {"reference": "registered-base", "description": "Synthetic Bpost registered base stamp"},
+        {"reference": "registered-supplement", "description": "Synthetic Bpost registered supplement stamp"}
+      ],
+      "tariff": {
+        "revision": "development-v1",
+        "currency": "EUR",
+        "unit_prices": {
+          "prior-1": "1.50",
+          "non-prior-1": "1.20",
+          "registered-base": "2.40",
+          "registered-supplement": "4.10"
+        }
+      },
+      "policy": {
+        "revision": "development-v1",
+        "rules": [
+          {"service_type": "ordinary", "speed": "priority", "maximum_weight_g": "50", "supplies": [{"reference": "prior-1", "quantity": 1}]},
+          {"service_type": "ordinary", "speed": "non_priority", "maximum_weight_g": "50", "supplies": [{"reference": "non-prior-1", "quantity": 1}]},
+          {"service_type": "registered", "speed": null, "maximum_weight_g": "50", "supplies": [{"reference": "registered-base", "quantity": 1}, {"reference": "registered-supplement", "quantity": 1}]}
+        ]
+      }
+    }
+  }
+}

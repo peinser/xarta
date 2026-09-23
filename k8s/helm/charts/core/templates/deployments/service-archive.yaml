@@ -1,0 +1,175 @@
+{{ if .Values.services.archive.enabled }}
+
+{{- $deployment := include "service.name" (dict "release" $.Release "name" "archive") }}
+{{- $doctypeDeployment := include "service.name" (dict "release" $.Release "name" "documenttype") }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: {{ $deployment }}
+    xarta-environment: {{ .Release.Name }}
+  name: {{ $deployment }}
+spec:
+  replicas: {{ include "deploy.replicas" .Values.services.archive }}
+  selector:
+    matchLabels:
+      app: {{ $deployment }}
+  template:
+    metadata:
+      annotations:
+        # The following configuration forces the deployment to reconfigure whenever the cache configuration has been modified.
+        checksum-config-cache: {{ include (print $.Template.BasePath "/config-maps/cache.yaml") . | sha256sum }}
+        checksum-postgresql-owners: {{ include (print $.Template.BasePath "/secrets/postgresql-owners.yaml") . | sha256sum }}
+        {{- if or .Values.services.archive.existingSecret .Values.services.archive.settings.adapters.config }}
+        checksum-archive-adapters: {{ include (print $.Template.BasePath "/secrets/archive-adapters.yaml") . | sha256sum }}
+        {{- end }}
+        {{- if or .Values.services.archive.settings.storage.existingSecret .Values.services.archive.settings.storage.config }}
+        checksum-archive-storage: {{ include (print $.Template.BasePath "/secrets/archive-storage.yaml") . | sha256sum }}
+        {{- end }}
+      labels:
+        app: {{ $deployment }}
+        xarta-environment: {{ .Release.Name }}
+        {{- if .Values.defaults.loki.enabled }}
+        loki: {{ .Values.defaults.loki.tenant }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+
+      {{- include "service.constraints" $ | nindent 6 }}
+
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: {{ .Values.defaults.restartPolicy }}
+      {{ include "service.pullSecrets" $ | nindent 6 -}}
+
+      volumes:
+      - name: archive
+        persistentVolumeClaim:
+          claimName: {{ .Values.volumes.archive.existingClaim }}
+      - name: bundle
+        persistentVolumeClaim:
+          claimName: {{ .Values.volumes.bundle.existingClaim }}
+      {{- include "temporaryStorage.volume" $ | nindent 6 }}
+      - name: cache
+        configMap:
+          name: {{ printf "%s-cache" .Release.Name }}
+          items:
+          - key: cache.json
+            path: cache.json
+      {{- if or .Values.services.archive.settings.storage.existingSecret .Values.services.archive.settings.storage.config }}
+      - name: archive-storage-config
+        secret:
+          secretName: {{ .Values.services.archive.settings.storage.existingSecret | default (printf "%s-core-archive-storage" .Release.Name) }}
+      {{- end }}
+      {{- range .Values.services.archive.settings.storage.mounts }}
+      - name: {{ .name }}
+        persistentVolumeClaim:
+          claimName: {{ required "archive storage mount existingClaim is required" .existingClaim }}
+      {{- end }}
+      {{- if or .Values.services.archive.existingSecret .Values.services.archive.settings.adapters.config }}
+      - name: archive-adapters
+        secret:
+          secretName: {{ .Values.services.archive.existingSecret | default (printf "%s-core-archive-adapters" .Release.Name) }}
+      {{- end }}
+
+      containers:
+
+      - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ $deployment }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+        args: [
+          "services",
+          {{ if $.Values.image.debug -}}
+          --debug,
+          {{- end }}
+          "--run", "archive=latest",
+          "--run", "archive=v1"
+        ]
+
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+
+        volumeMounts:
+        - name: archive
+          mountPath: {{ .Values.volumes.archive.path }}
+        - name: bundle
+          readOnly: true
+          mountPath: {{ .Values.volumes.bundle.path }}
+        {{- include "temporaryStorage.mount" $ | nindent 8 }}
+        - name: cache
+          readOnly: true
+          mountPath: /mnt/config/cache.json
+          subPath: cache.json
+        {{- if or .Values.services.archive.settings.storage.existingSecret .Values.services.archive.settings.storage.config }}
+        - name: archive-storage-config
+          readOnly: true
+          mountPath: /mnt/config/archive-storage.json
+          subPath: archive-storage.json
+        {{- end }}
+        {{- range .Values.services.archive.settings.storage.mounts }}
+        - name: {{ .name }}
+          mountPath: {{ required "archive storage mount mountPath is required" .mountPath }}
+        {{- end }}
+        {{- if or .Values.services.archive.existingSecret .Values.services.archive.settings.adapters.config }}
+        - name: archive-adapters
+          readOnly: true
+          mountPath: /mnt/config/archive.json
+          subPath: archive.json
+        {{- end }}
+
+        env:
+        {{- include "telemetry.env" (dict "root" $ "name" "archive") | nindent 8 }}
+        - name: ARCHIVE_SERVICE_ENDPOINT
+          value: http://{{ $deployment }}/api/archive
+        - name: ARCHIVE_SERVICE_TIMEOUT
+          value: {{ .Values.services.archive.settings.timeout | default 30.0 | quote }}
+        {{- if or .Values.services.archive.existingSecret .Values.services.archive.settings.adapters.config }}
+        - name: ARCHIVE_CONFIGURATIONS_CONFIG_PATH
+          value: /mnt/config/archive.json
+        {{- end }}
+        - name: DOCUMENT_TYPE_SERVICE_ENDPOINT
+          value: http://{{ $doctypeDeployment }}/api/document-type
+        - name: DOCUMENT_TYPE_SERVICE_TIMEOUT
+          value: {{ .Values.services.archive.settings.timeout | default 30.0 | quote }}
+        - name: ARCHIVE_STORAGE
+          value: {{ .Values.volumes.archive.path | quote }}
+        - name: ARCHIVE_DELETION_RECONCILER_ENABLED
+          value: {{ .Values.services.archive.settings.deletionReconciler.enabled | quote }}
+        - name: ARCHIVE_DELETION_RECONCILER_BATCH_SIZE
+          value: {{ .Values.services.archive.settings.deletionReconciler.batchSize | quote }}
+        - name: ARCHIVE_DELETION_RECONCILER_CONCURRENCY
+          value: {{ .Values.services.archive.settings.deletionReconciler.concurrency | quote }}
+        - name: ARCHIVE_DELETION_RECONCILER_SCAN_SECONDS
+          value: {{ .Values.services.archive.settings.deletionReconciler.scanSeconds | quote }}
+        - name: ARCHIVE_DELETION_RECONCILER_ACK_WAIT_SECONDS
+          value: {{ .Values.services.archive.settings.deletionReconciler.ackWaitSeconds | quote }}
+        - name: ARCHIVE_DELETION_RECONCILER_MAX_BACKOFF_SECONDS
+          value: {{ .Values.services.archive.settings.deletionReconciler.maxBackoffSeconds | quote }}
+        {{- if or .Values.services.archive.settings.storage.existingSecret .Values.services.archive.settings.storage.config }}
+        - name: ARCHIVE_STORAGE_CONFIG_PATH
+          value: /mnt/config/archive-storage.json
+        {{- end }}
+        - name: BUNDLE_STORAGE
+          value: {{ .Values.volumes.bundle.path | quote }}
+        {{- include "temporaryStorage.env" $ | nindent 8 }}
+        - name: CACHE_CONFIG_PATH
+          value: "/mnt/config/cache.json"
+        - name: NATS_SERVERS
+          value: {{ .Values.nats.servers | quote }}
+        - name: NATS_WORKERS
+          value: {{ .Values.services.archive.settings.nats.workers | default 10 | quote }}
+        {{- include "archive-postgresql.env" $ | nindent 8 }}
+
+        {{- include "resources" $ | nindent 8 }}
+        {{- include "probes" $ | nindent 8 }}
+
+{{- end }}

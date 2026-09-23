@@ -1,0 +1,54 @@
+{{- if .Values.jobs.cleanupGenerate.enabled }}
+{{- $job :=  printf "%s-cleanup-generate" .Release.Name -}}
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $job }}
+spec:
+  schedule: {{ .Values.jobs.cleanupGenerate.schedule | quote }}
+
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: {{ $job }}
+            {{- if .Values.defaults.loki.enabled }}
+            loki: {{ .Values.defaults.loki.tenant }}
+            {{- end }}
+        spec:
+          automountServiceAccountToken: false
+          securityContext:
+            runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+            fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+
+          dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+          restartPolicy: Never
+
+          volumes:
+          {{- include "temporaryStorage.volume" $ | nindent 10 }}
+
+          containers:
+          - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+            imagePullPolicy: {{ .Values.image.pullPolicy }}
+            name: {{ $job }}
+            securityContext:
+              allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+              privileged: {{ .Values.defaults.securityContext.privileged }}
+              runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+            command: ["python"]
+            args: ["-m", "xarta.bin.jobs", "--run", "cleanup_generate=latest"]
+
+            volumeMounts:
+            {{- include "temporaryStorage.mount" $ | nindent 12 }}
+
+            env:
+            {{- include "temporaryStorage.env" $ | nindent 12 }}
+
+{{- end }}

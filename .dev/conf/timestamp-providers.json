@@ -1,0 +1,11 @@
+{
+  "providers": {
+    "local-dev-tsa": {
+      "provider": "http-rfc3161",
+      "endpoint": "http://127.0.0.1:8403/",
+      "timeout_seconds": 5,
+      "certificate_pem": ".dev/runtime/certificates/tsa-public.pem",
+      "trust_root_pem": ".dev/runtime/certificates/root.pem"
+    }
+  }
+}

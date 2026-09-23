@@ -1,0 +1,216 @@
+{{- if .Values.services.intake.enabled }}
+
+{{- $deployment := include "service.name" (dict "release" $.Release "name" "intake") -}}
+{{- $profiles := .Values.services.intake.profiles -}}
+{{- $profilesConfigMap := $profiles.existingConfigMap | default (printf "%s-core-flow-profiles" .Release.Name) -}}
+{{- $signatureConfiguration := .Values.services.signature.configuration -}}
+{{- $signatureConfigMap := $signatureConfiguration.existingConfigMap | default (printf "%s-core-signature" .Release.Name) -}}
+{{- $transform := (get .Values.services "transform") | default dict -}}
+{{- $x402 := .Values.services.intake.x402 -}}
+{{- $pricing := $x402.pricing -}}
+{{- $pricingConfigMap := $pricing.existingConfigMap | default (printf "%s-core-pricing" .Release.Name) -}}
+{{- $capabilities := list -}}
+{{- if .Values.services.archive.enabled -}}
+{{- $capabilities = append $capabilities "archive" -}}
+{{- $capabilities = append $capabilities "wait-for" -}}
+{{- end -}}
+{{- if .Values.services.bundle.enabled -}}
+{{- $capabilities = append $capabilities "bundle" -}}
+{{- end -}}
+{{- if .Values.services.email.enabled -}}
+{{- $capabilities = append $capabilities "email" -}}
+{{- end -}}
+{{- if .Values.services.generate.enabled -}}
+{{- $capabilities = append $capabilities "generate" -}}
+{{- end -}}
+{{- if .Values.services.sftp.enabled -}}
+{{- $capabilities = append $capabilities "sftp" -}}
+{{- end -}}
+{{- if .Values.services.peppol.enabled -}}
+{{- $capabilities = append $capabilities "peppol" -}}
+{{- end -}}
+{{- if .Values.services.postal.enabled -}}
+{{- $capabilities = append $capabilities "postal" -}}
+{{- end -}}
+{{- if .Values.services.signature.enabled -}}
+{{- $capabilities = append $capabilities "signature" -}}
+{{- end -}}
+{{- if $transform.enabled -}}
+{{- $capabilities = append $capabilities "transform" -}}
+{{- end -}}
+{{- if .Values.services.search.enabled -}}
+{{- $capabilities = append $capabilities "search-index" -}}
+{{- end -}}
+{{- if .Values.services.doccle.enabled -}}
+{{- $capabilities = append $capabilities "doccle" -}}
+{{- end -}}
+{{- if .Values.services.webhook.enabled -}}
+{{- $capabilities = append $capabilities "webhook" -}}
+{{- end -}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: {{ $deployment }}
+    xarta-environment: {{ .Release.Name }}
+  name: {{ $deployment }}
+spec:
+  replicas: {{ include "deploy.replicas" .Values.services.intake }}
+  selector:
+    matchLabels:
+      app: {{ $deployment }}
+  template:
+    metadata:
+      {{- if or (or (or $profiles.existingConfigMap $profiles.config) .Values.services.signature.enabled) $x402.enabled }}
+      annotations:
+        {{- if or $profiles.existingConfigMap $profiles.config }}
+        checksum-flow-profiles: {{ $profiles.config | default $profiles.existingConfigMap | toJson | sha256sum }}
+        {{- end }}
+        {{- if .Values.services.signature.enabled }}
+        checksum-signature-configuration: {{ $signatureConfiguration.config | default $signatureConfiguration.existingConfigMap | toJson | sha256sum }}
+        {{- end }}
+        {{- if $x402.enabled }}
+        checksum-pricing-configuration: {{ $pricing.config | default $pricing.existingConfigMap | toJson | sha256sum }}
+        {{- end }}
+      {{- end }}
+      labels:
+        app: {{ $deployment }}
+        xarta-environment: {{ .Release.Name }}
+        {{- if .Values.defaults.loki.enabled }}
+        loki: {{ .Values.defaults.loki.tenant }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+
+      {{- include "service.constraints" $ | nindent 6 }}
+
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: {{ .Values.defaults.restartPolicy }}
+      {{ include "service.pullSecrets" $ | nindent 6 -}}
+
+      volumes:
+      {{- include "temporaryStorage.volume" $ | nindent 6 }}
+      {{- if or $profiles.existingConfigMap $profiles.config }}
+      - name: flow-profiles
+        configMap:
+          name: {{ $profilesConfigMap }}
+          items:
+          - key: flow-profiles.json
+            path: flow-profiles.json
+      {{- end }}
+      {{- if .Values.services.signature.enabled }}
+      - name: signature-configuration
+        configMap:
+          name: {{ $signatureConfigMap }}
+      {{- end }}
+      {{- if $x402.enabled }}
+      - name: pricing-configuration
+        configMap:
+          name: {{ $pricingConfigMap }}
+          items:
+          - key: pricing.json
+            path: pricing.json
+      {{- end }}
+
+      containers:
+
+      - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ $deployment }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+        args: [
+          "services",
+          {{ if $.Values.image.debug -}}
+          --debug,
+          {{- end }}
+          "--run", "intake=latest",
+          "--run", "intake=v1",
+          "--run", "agents=latest"
+        ]
+
+        volumeMounts:
+        {{- include "temporaryStorage.mount" $ | nindent 8 }}
+        {{- if or $profiles.existingConfigMap $profiles.config }}
+        - name: flow-profiles
+          readOnly: true
+          mountPath: /mnt/config/flow-profiles
+        {{- end }}
+        {{- if .Values.services.signature.enabled }}
+        - name: signature-configuration
+          readOnly: true
+          mountPath: /mnt/config/signature
+        {{- end }}
+        {{- if $x402.enabled }}
+        - name: pricing-configuration
+          readOnly: true
+          mountPath: /mnt/config/pricing
+        {{- end }}
+
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+
+        env:
+        {{- include "telemetry.env" (dict "root" $ "name" "intake") | nindent 8 }}
+        - name: NATS_SERVERS
+          value: {{ .Values.nats.servers | quote }}
+        {{- include "temporaryStorage.env" $ | nindent 8 }}
+        - name: INTAKE_CAPABILITIES
+          value: {{ $capabilities | toJson | quote }}
+        {{- if .Values.services.signature.enabled }}
+        - name: SIGNATURE_CONFIG_PATH
+          value: /mnt/config/signature/signature.json
+        - name: SIGNATURE_ALLOW_DEVELOPMENT_POLICIES
+          value: {{ .Values.services.signature.settings.allowDevelopmentPolicies | quote }}
+        {{- end }}
+        {{- if or $profiles.existingConfigMap $profiles.config }}
+        - name: FLOW_PROFILES_CONFIG_PATH
+          value: /mnt/config/flow-profiles/flow-profiles.json
+        {{- end }}
+        - name: X402_ENABLED
+          value: {{ $x402.enabled | quote }}
+        - name: X402_INTAKE_ENABLED
+          value: {{ $x402.enabled | quote }}
+        - name: X402_PREVIEW_ENABLED
+          value: "false"
+        {{- if $x402.enabled }}
+        {{- if not $x402.facilitatorUrl }}
+        {{- fail "enabled services.intake.x402 requires facilitatorUrl" }}
+        {{- end }}
+        {{- if not $x402.payTo }}
+        {{- fail "enabled services.intake.x402 requires payTo" }}
+        {{- end }}
+        {{- if not $x402.challengeSigningSecretName }}
+        {{- fail "enabled services.intake.x402 requires challengeSigningSecretName" }}
+        {{- end }}
+        - name: X402_FACILITATOR_URL
+          value: {{ $x402.facilitatorUrl | quote }}
+        - name: X402_NETWORK
+          value: {{ $x402.network | quote }}
+        - name: X402_PAY_TO
+          value: {{ $x402.payTo | quote }}
+        - name: X402_PAYMENT_TIMEOUT_SECONDS
+          value: {{ $x402.paymentTimeoutSeconds | quote }}
+        - name: X402_INTAKE_RESOURCE_URL
+          value: {{ $x402.intakeResourceUrl | default (printf "%s/api/v1/intake/" .Values.base) | quote }}
+        - name: X402_CHALLENGE_SIGNING_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ $x402.challengeSigningSecretName | quote }}
+              key: challenge-signing-key
+        - name: PRICING_CONFIG_PATH
+          value: /mnt/config/pricing/pricing.json
+        {{- end }}
+
+        {{- include "resources" $ | nindent 8 }}
+        {{- include "probes" $ | nindent 8 }}
+
+{{- end }}

@@ -1,0 +1,46 @@
+{{- if .Values.jobs.setupNats.enabled }}
+{{- $job :=  printf "%s-setup-nats" .Release.Name -}}
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $job }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation
+    "helm.sh/hook-weight": "1"
+spec:
+  template:
+    metadata:
+      labels:
+        app: {{ $job }}
+        {{- if .Values.defaults.loki.enabled }}
+        loki: {{ .Values.defaults.loki.tenant }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: Never
+
+      containers:
+
+      - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ $job }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+        command: ["python"]
+        args: ["-m", "xarta.bin.jobs", "--run", "setup_nats=latest"]
+
+        env:
+        - name: NATS_SERVERS
+          value: {{ .Values.nats.servers | quote }}
+
+{{- end }}

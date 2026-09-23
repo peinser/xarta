@@ -1,0 +1,31 @@
+{
+  "id": "10000000-0000-0000-0000-000000000101",
+  "correlation_id": "20000000-0000-0000-0000-000000000101",
+  "dag": {
+    "id": "30000000-0000-0000-0000-000000000101",
+    "kind": "doccle",
+    "receiver": {
+      "subject": {
+        "customer_id": "CUST-123456",
+        "company": "BE0123456789"
+      }
+    },
+    "document": {
+      "source": "generate",
+      "id": "90000000-0000-0000-0000-000000000101"
+    },
+    "document_type": "invoice",
+    "name": {
+      "en": "Invoice INV-2026-0042",
+      "nl": "Factuur INV-2026-0042"
+    },
+    "on": {
+      "stored": [{"id": "40000000-0000-0000-0000-000000000101", "kind": "debug"}],
+      "receiver_not_found": [{"id": "50000000-0000-0000-0000-000000000101", "kind": "debug"}],
+      "receiver_not_provisioned": [{"id": "60000000-0000-0000-0000-000000000101", "kind": "debug"}],
+      "document_rejected": [{"id": "70000000-0000-0000-0000-000000000101", "kind": "debug"}],
+      "outcome_uncertain": [{"id": "80000000-0000-0000-0000-000000000101", "kind": "debug"}],
+      "execution_failed": [{"id": "81000000-0000-0000-0000-000000000101", "kind": "debug"}]
+    }
+  }
+}

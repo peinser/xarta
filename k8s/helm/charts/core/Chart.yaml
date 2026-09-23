@@ -1,0 +1,11 @@
+apiVersion: v2
+name: core
+description: A specification for Xarta's core k8s setup.
+type: application
+version: 0.0.10-dev
+appVersion: 0.0.10-dev
+maintainers:
+  - name: Peinser BV
+    url: https://github.com/peinser
+sources:
+  - https://github.com/peinser/xarta

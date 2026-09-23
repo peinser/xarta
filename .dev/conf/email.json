@@ -1,0 +1,16 @@
+{
+  "payroll@example.test": {
+    "kind": "email",
+    "adapter": "resend-rest",
+    "current_revision": "v1",
+    "revisions": {
+      "v1": {
+        "base_url": "https://api.resend.com",
+        "api_key": "replace-with-resend-api-key",
+        "webhook_secret": "whsec_cmVwbGFjZS13aXRoLXJlc2VuZC13ZWJob29rLXNlY3JldA==",
+        "account_id": "replace-with-resend-account-id",
+        "feedback_retention_seconds": 86400
+      }
+    }
+  }
+}

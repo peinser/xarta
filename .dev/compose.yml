@@ -1,0 +1,239 @@
+services:
+
+  app_xarta_core:
+    container_name: app-xarta
+    build:
+      target: devcontainer
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    environment:
+    - DOCUMENT_SIGN_PUBLIC_PEM=.dev/runtime/certificates/public.pem
+    - DOCUMENT_SIGN_PRIVATE_PEM=.dev/runtime/certificates/private.pem
+    - DOCUMENT_SIGN_CHAIN_PEM=.dev/runtime/certificates/chain.pem
+    - SIGNATURE_CONFIG_PATH=.dev/conf/signature.json
+    - TIMESTAMP_PROVIDERS_CONFIG_PATH=.dev/conf/timestamp-providers.json
+    - SIGNATURE_ALLOW_DEVELOPMENT_POLICIES=true
+    - POSTAL_CONFIGURATIONS_CONFIG_PATH=.dev/conf/postal-destinations.json
+    - POSTAL_LOCAL_PROFILES_CONFIG_PATH=.dev/conf/postal-local-profiles.json
+    - POSTAL_BPOST_PROFILES_CONFIG_PATH=.dev/conf/postal-bpost-profiles.json
+    - POSTAL_LOCAL_CAPACITY_CONFIG_PATH=.dev/conf/postal-local-capacity.json
+    - POSTAL_LOCAL_STATIONS_CONFIG_PATH=.dev/conf/postal-local-stations.json
+    - POSTAL_LOCAL_STORAGE_CONFIG_PATH=.dev/conf/postal-local-storage.json
+    - TMP_STORAGE=storage/tmp
+    - TMP_STORAGE_CONFIG_PATH=.dev/conf/tmp-storage.json
+    - ARCHIVE_STORAGE=storage/archive
+    - ARCHIVE_STORAGE_CONFIG_PATH=.dev/conf/archive-storage.json
+    - SEARCH_CONFIGURATIONS_CONFIG_PATH=.dev/conf/search.json
+    - DOCCLE_CONFIGURATIONS_CONFIG_PATH=.dev/conf/doccle.json
+    - DOCCLE_DEFAULT_DESTINATION=dev-doccle
+    - DOCCLE_CONTROL_PLANE_TOKEN=replace-with-explicit-doccle-control-token
+    - DOCCLE_CALLBACKS_ENABLED=false
+    - BUNDLE_STORAGE=storage/bundle
+    - CACHE_CONFIG_PATH=.dev/conf/cache.json
+    - TEMPLATE_ENGINES_CONFIG_PATH=.dev/conf/template-engines.json
+    - EMAIL_CONFIGURATIONS_CONFIG_PATH=.dev/conf/email.json
+    - SFTP_CONFIGURATIONS_CONFIG_PATH=.dev/conf/sftp.json
+    - PEPPOL_CONFIGURATIONS_CONFIG_PATH=.dev/conf/peppol.json
+    - ARCHIVE_CONFIGURATIONS_CONFIG_PATH=.dev/conf/archive.json
+    - DOCUMENT_TYPE_SERVICE_ENDPOINT=http://localhost:8000/api/document-type
+    - DOCUMENT_TYPE_SERVICE_TIMEOUT=10.0
+    - ARCHIVE_SERVICE_ENDPOINT=http://localhost:8000/api/archive
+    - ARCHIVE_SERVICE_TIMEOUT=10.0
+    - RENDER_SERVICE_ENDPOINT=http://localhost:8000/api/render
+    - RENDER_SERVICE_TIMEOUT=10.0
+    - BUNDLE_SERVICE_ENDPOINT=http://localhost:8000/api/bundle
+    - BUNDLE_SERVICE_TIMEOUT=10.0
+    - REDIS_CONNECTION_STRING=redis://:dev@redis:6379?decode_responses=True&protocol=3
+    - POSTGRESQL_USER=dev
+    - POSTGRESQL_PASSWORD=dev
+    - POSTGRESQL_DATABASE=dev
+    - POSTGRESQL_HOST=postgres
+    - ARCHIVE_POSTGRESQL_USER=dev
+    - ARCHIVE_POSTGRESQL_PASSWORD=dev
+    - ARCHIVE_POSTGRESQL_DATABASE=archive
+    - ARCHIVE_POSTGRESQL_HOST=postgres
+    - NATS_SERVERS=nats://nats:4222
+    - NATS_WORKERS=5
+    - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    - OTEL_TRACES_SAMPLER=${OTEL_TRACES_SAMPLER:-always_on}
+    - X402_NETWORK=${X402_NETWORK:-eip155:84532}
+    - X402_ENABLED=${X402_ENABLED:-false}
+    - X402_INTAKE_ENABLED=${X402_INTAKE_ENABLED:-false}
+    - X402_PREVIEW_ENABLED=${X402_PREVIEW_ENABLED:-false}
+    - X402_CHALLENGE_SIGNING_KEY=${X402_CHALLENGE_SIGNING_KEY:-}
+    - PRICING_CONFIG_PATH=.dev/conf/pricing.json
+    - INTAKE_CAPABILITIES=["archive","bundle","doccle","email","generate","postal","search-index","sftp","signature","wait-for","webhook"]
+    - FLOW_PROFILES_CONFIG_PATH=.dev/conf/flow-profiles.json
+    ports:
+    - 8000:8000
+    - 4200:4200
+    command: sleep infinity
+    volumes:
+    - ..:/workspace:cached
+    - xarta_archive:/workspace/storage/archive
+    - xarta_tmp:/workspace/storage/tmp
+    networks:
+    - xarta
+    - jinja-engine
+    - gotenberg-engine
+
+  ## BEGIN Template Engines ###################################################
+
+  template_engine_jinja:
+    image: ${JINJA_ENGINE_IMAGE:-harbor.peinser.com/xarta/template-engines/jinja:latest-dev}
+    container_name: template-engine-jinja
+    command: "1"
+    networks:
+    - jinja-engine
+
+  template_engine_gotenberg:
+    image: ${GOTENBERG_IMAGE:-gotenberg/gotenberg:8}
+    container_name: template-engine-gotenberg
+    networks:
+    - gotenberg-engine
+
+  ## END Template Engines #####################################################
+
+  postgres:
+    container_name: postgres
+    image: postgres:16
+    ports:
+    - 5432:5432
+    environment:
+      POSTGRES_DB: dev
+      POSTGRES_PASSWORD: dev
+      POSTGRES_USER: dev
+    healthcheck:
+      test: pg_isready -U dev -h 127.0.0.1
+      interval: 15s
+    volumes:
+    - xarta_postgres:/var/lib/postgresql/data
+    networks:
+    - xarta
+
+  pgadmin:
+    container_name: pgadmin
+    image: dpage/pgadmin4:8.13
+    environment:
+      PGADMIN_DEFAULT_EMAIL: dev@peinser.com
+      PGADMIN_DEFAULT_PASSWORD: dev
+      PGADMIN_LISTEN_PORT: 80
+    ports:
+    - 8181:80
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+    - xarta
+    volumes:
+    - xarta_pgadmin:/var/lib/pgadmin
+
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
+    container_name: cache
+    restart: unless-stopped
+    ulimits:
+      memlock: -1
+    ports:
+    - 6379:6379
+    networks:
+    - xarta
+
+  nats:
+    image: nats:2.14.6
+    restart: always
+    container_name: nats
+    ports:
+    - 4222:4222
+    - 8222:8222
+    hostname: nats
+    command: -js -sd /data -m 8222
+    volumes:
+    - xarta_nats:/data
+    networks:
+    - xarta
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: xarta-dev
+      MINIO_ROOT_PASSWORD: xarta-dev-secret
+    ports:
+    - 9000:9000
+    - 9001:9001
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+    - xarta_minio:/data
+    networks:
+    - xarta
+
+  minio_init:
+    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mc alias set local http://minio:9000 xarta-dev xarta-dev-secret && mc mb --ignore-existing local/xarta-archive local/xarta-archive-secondary local/xarta-tmp"]
+    networks:
+    - xarta
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.2
+    container_name: opensearch
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+    - 9200:9200
+    - 9600:9600
+    volumes:
+    - xarta_opensearch:/usr/share/opensearch/data
+    networks:
+    - xarta
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.136.0
+    profiles: [observability]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+    - ${XARTA_WORKSPACE:-..}/.dev/conf/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+    - 4318:4318
+    - 8888:8888
+    - 13133:13133
+    depends_on:
+    - jaeger
+    networks:
+    - xarta
+
+  jaeger:
+    image: jaegertracing/jaeger:2.10.0
+    profiles: [observability]
+    ports:
+    - 16686:16686
+    networks:
+    - xarta
+
+volumes:
+  xarta_postgres:
+  xarta_pgadmin:
+  xarta_archive:
+  xarta_tmp:
+  xarta_minio:
+  xarta_opensearch:
+  xarta_nats:
+
+networks:
+  jinja-engine:
+    driver: bridge
+  gotenberg-engine:
+    driver: bridge
+  xarta:
+    driver: bridge

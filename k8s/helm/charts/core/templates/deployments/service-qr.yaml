@@ -1,0 +1,70 @@
+{{ if .Values.services.qr.enabled }}
+
+{{- $deployment := include "service.name" (dict "release" $.Release "name" "qr") }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: {{ $deployment }}
+    xarta-environment: {{ .Release.Name }}
+  name: {{ $deployment }}
+spec:
+  replicas: {{ include "deploy.replicas" .Values.services.qr }}
+  selector:
+    matchLabels:
+      app: {{ $deployment }}
+  template:
+    metadata:
+      labels:
+        app: {{ $deployment }}
+        xarta-environment: {{ .Release.Name }}
+        {{- if .Values.defaults.loki.enabled }}
+        loki: {{ .Values.defaults.loki.tenant }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+
+      {{- include "service.constraints" $ | nindent 6 }}
+
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: {{ .Values.defaults.restartPolicy }}
+      {{ include "service.pullSecrets" $ | nindent 6 -}}
+
+      containers:
+
+      - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ $deployment }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+        args: [
+          "services",
+          {{ if $.Values.image.debug -}}
+          --debug,
+          {{- end }}
+          "--run", "qr=latest",
+          "--run", "qr=v1"
+        ]
+
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+
+        env:
+        {{- include "telemetry.env" (dict "root" $ "name" "qr") | nindent 8 }}
+        - name: ARCHIVE_SERVICE_ENDPOINT
+          value: {{ .Values.base }}/api/archive
+        - name: ARCHIVE_SERVICE_TIMEOUT
+          value: {{ .Values.services.qr.settings.timeout | default 30 | quote }}
+
+        {{- include "resources" $ | nindent 8 }}
+        {{- include "probes" $ | nindent 8 }}
+
+{{- end }}

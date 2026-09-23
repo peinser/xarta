@@ -1,0 +1,29 @@
+{
+  "steps": [
+    {
+      "name": "provider_accepts_submission",
+      "expected_node_execution_state": "waiting_feedback",
+      "expected_scheduled_node_ids": []
+    },
+    {
+      "name": "alice_delivered",
+      "external_event_id": "email-event-001",
+      "expected_outcomes": [{"outcome": "delivered", "subject": {"kind": "recipient", "id": "alice@example.com"}}],
+      "expected_node_execution_state": "waiting_feedback",
+      "expected_scheduled_node_ids": []
+    },
+    {
+      "name": "bob_mailbox_full",
+      "external_event_id": "email-event-002",
+      "expected_outcomes": [
+        {"outcome": "mailbox_full", "subject": {"kind": "recipient", "id": "bob@example.com"}},
+        {"outcome": "partially_delivered", "subject": null}
+      ],
+      "expected_node_execution_state": "resolved",
+      "expected_scheduled_node_ids": [
+        "40000000-0000-0000-0000-000000000001",
+        "70000000-0000-0000-0000-000000000001"
+      ]
+    }
+  ]
+}

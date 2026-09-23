@@ -1,0 +1,227 @@
+name: xarta-split-scenario
+
+x-service: &service
+  image: ${XARTA_SCENARIO_IMAGE:-dev-app_xarta_core}
+  working_dir: /workspace
+  init: true
+  stop_grace_period: 15s
+  volumes:
+    - ${XARTA_SCENARIO_WORKSPACE:?Set XARTA_SCENARIO_WORKSPACE to the host workspace path}:/workspace:ro
+  networks:
+    - xarta
+  healthcheck:
+    test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8000/.info/readyz >/dev/null"]
+    interval: 1s
+    timeout: 2s
+    retries: 60
+    start_period: 2s
+
+x-environment: &environment
+  PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  NATS_SERVERS: nats://nats:4222
+  NATS_WORKERS: ${SEARCH_SCENARIO_NATS_WORKERS:-10}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-always_on}
+  TMP_STORAGE: storage/tmp
+  TMP_STORAGE_CONFIG_PATH: .dev/conf/tmp-storage.json
+
+services:
+  intake:
+    <<: *service
+    command:
+      - uv
+      - run
+      - --frozen
+      - python
+      - -m
+      - xarta.bin.services
+      - --host
+      - 0.0.0.0
+      - --workers
+      - "1"
+      - --run
+      - intake=latest
+      - --run
+      - intake=v1
+    environment:
+      <<: *environment
+      OTEL_SERVICE_NAME: xarta-intake
+      INTAKE_CAPABILITIES: '["archive","generate","search-index","signature"]'
+      SIGNATURE_CONFIG_PATH: .dev/conf/signature.json
+      SIGNATURE_ALLOW_DEVELOPMENT_POLICIES: "true"
+      X402_ENABLED: "false"
+      X402_INTAKE_ENABLED: "false"
+      X402_PREVIEW_ENABLED: "false"
+
+  archive:
+    <<: *service
+    command:
+      - uv
+      - run
+      - --frozen
+      - python
+      - -m
+      - xarta.bin.services
+      - --host
+      - 0.0.0.0
+      - --workers
+      - "1"
+      - --run
+      - archive=latest
+      - --run
+      - archive=v1
+    environment:
+      <<: *environment
+      OTEL_SERVICE_NAME: xarta-archive
+      ARCHIVE_CONFIGURATIONS_CONFIG_PATH: .dev/conf/scenarios/archive-split.json
+      ARCHIVE_STORAGE: storage/archive
+      ARCHIVE_STORAGE_CONFIG_PATH: .dev/conf/archive-storage.json
+      ARCHIVE_SERVICE_ENDPOINT: http://archive:8000/api/archive
+      ARCHIVE_SERVICE_TIMEOUT: "10.0"
+      ARCHIVE_POSTGRESQL_USER: dev
+      ARCHIVE_POSTGRESQL_PASSWORD: dev
+      ARCHIVE_POSTGRESQL_DATABASE: archive
+      ARCHIVE_POSTGRESQL_HOST: postgres
+      ARCHIVE_REPRESENTATION_WRITE_CONCURRENCY: ${ARCHIVE_REPRESENTATION_WRITE_CONCURRENCY:-10}
+      ARCHIVE_DELETION_RECONCILER_CONCURRENCY: ${ARCHIVE_DELETION_RECONCILER_CONCURRENCY:-25}
+      BUNDLE_STORAGE: storage/bundle
+      CACHE_CONFIG_PATH: .dev/conf/cache.json
+      DOCUMENT_TYPE_SERVICE_ENDPOINT: http://generation:8000/api/document-type
+      DOCUMENT_TYPE_SERVICE_TIMEOUT: "10.0"
+
+  generation:
+    <<: *service
+    networks:
+      - xarta
+      - jinja-engine
+    command:
+      - uv
+      - run
+      - --frozen
+      - python
+      - -m
+      - xarta.bin.services
+      - --host
+      - 0.0.0.0
+      - --workers
+      - "1"
+      - --run
+      - generate=latest
+      - --run
+      - generate=v1
+      - --run
+      - documenttype=latest
+      - --run
+      - documenttype=v1
+      - --run
+      - render=latest
+      - --run
+      - render=v1
+    environment:
+      <<: *environment
+      OTEL_SERVICE_NAME: xarta-generation
+      ARCHIVE_SERVICE_ENDPOINT: http://archive:8000/api/archive
+      ARCHIVE_SERVICE_TIMEOUT: "10.0"
+      BUNDLE_SERVICE_ENDPOINT: http://bundle:8000/api/bundle
+      BUNDLE_SERVICE_TIMEOUT: "10.0"
+      CACHE_CONFIG_PATH: .dev/conf/cache.json
+      DOCUMENT_TYPE_SERVICE_ENDPOINT: http://generation:8000/api/document-type
+      DOCUMENT_TYPE_SERVICE_TIMEOUT: "10.0"
+      POSTGRESQL_USER: dev
+      POSTGRESQL_PASSWORD: dev
+      POSTGRESQL_DATABASE: dev
+      POSTGRESQL_HOST: postgres
+      RENDER_SERVICE_ENDPOINT: http://generation:8000/api/render
+      RENDER_SERVICE_TIMEOUT: "10.0"
+      TEMPLATE_ENGINES_CONFIG_PATH: .dev/conf/template-engines.json
+
+  search:
+    <<: *service
+    command:
+      - uv
+      - run
+      - --frozen
+      - python
+      - -m
+      - xarta.bin.services
+      - --host
+      - 0.0.0.0
+      - --workers
+      - "1"
+      - --run
+      - search=latest
+      - --run
+      - search=v1
+    environment:
+      <<: *environment
+      OTEL_SERVICE_NAME: xarta-search
+      POSTGRESQL_USER: dev
+      POSTGRESQL_PASSWORD: dev
+      POSTGRESQL_DATABASE: dev
+      POSTGRESQL_HOST: postgres
+      SEARCH_CONFIGURATIONS_CONFIG_PATH: .dev/conf/search.json
+      ARCHIVE_SERVICE_ENDPOINT: http://archive:8000/api/archive
+      ARCHIVE_SERVICE_TIMEOUT: "10.0"
+      BUNDLE_SERVICE_ENDPOINT: http://bundle:8000/api/bundle
+      BUNDLE_SERVICE_TIMEOUT: "10.0"
+      RENDER_SERVICE_ENDPOINT: http://render:8000/api/render
+      RENDER_SERVICE_TIMEOUT: "10.0"
+
+  signature:
+    <<: *service
+    command:
+      - uv
+      - run
+      - --frozen
+      - python
+      - -m
+      - xarta.bin.services
+      - --host
+      - 0.0.0.0
+      - --workers
+      - "1"
+      - --run
+      - signature=latest
+      - --run
+      - signature=v1
+    environment:
+      <<: *environment
+      OTEL_SERVICE_NAME: xarta-signature
+      DOCUMENT_SIGN_PRIVATE_PEM: .dev/runtime/certificates/private.pem
+      DOCUMENT_SIGN_PUBLIC_PEM: .dev/runtime/certificates/public.pem
+      DOCUMENT_SIGN_CHAIN_PEM: .dev/runtime/certificates/chain.pem
+      SIGNATURE_CONFIG_PATH: .dev/conf/signature.json
+      SIGNATURE_ALLOW_DEVELOPMENT_POLICIES: "true"
+      TIMESTAMP_PROVIDERS_CONFIG_PATH: .dev/conf/timestamp-providers.json
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.136.0
+    profiles: [observability]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ${XARTA_SCENARIO_WORKSPACE:?Set XARTA_SCENARIO_WORKSPACE to the host workspace path}/.dev/conf/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - 4318:4318
+      - 8888:8888
+      - 13133:13133
+    depends_on:
+      - jaeger
+    networks:
+      - xarta
+
+  jaeger:
+    image: jaegertracing/jaeger:2.10.0
+    profiles: [observability]
+    ports:
+      - 16686:16686
+    networks:
+      - xarta
+
+networks:
+  xarta:
+    external: true
+    name: ${XARTA_SCENARIO_NETWORK:-dev_xarta}
+  jinja-engine:
+    external: true
+    name: ${XARTA_SCENARIO_JINJA_NETWORK:-dev_jinja-engine}

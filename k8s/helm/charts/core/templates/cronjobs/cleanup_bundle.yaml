@@ -1,0 +1,58 @@
+{{- if .Values.jobs.cleanupBundle.enabled }}
+{{- $job :=  printf "%s-cleanup-bundle" .Release.Name -}}
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $job }}
+spec:
+  schedule: {{ .Values.jobs.cleanupBundle.schedule | quote }}
+
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: {{ $job }}
+            {{- if .Values.defaults.loki.enabled }}
+            loki: {{ .Values.defaults.loki.tenant }}
+            {{- end }}
+        spec:
+          automountServiceAccountToken: false
+          securityContext:
+            runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+            fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+
+          dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+          restartPolicy: Never
+
+          volumes:
+          - name: bundle
+            persistentVolumeClaim:
+              claimName: {{ .Values.volumes.bundle.existingClaim }}
+
+          containers:
+          - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+            imagePullPolicy: {{ .Values.image.pullPolicy }}
+            name: {{ $job }}
+            securityContext:
+              allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+              privileged: {{ .Values.defaults.securityContext.privileged }}
+              runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+            command: ["python"]
+            args: ["-m", "xarta.bin.jobs", "--run", "cleanup_bundle=latest"]
+
+            volumeMounts:
+            - name: bundle
+              mountPath: {{ .Values.volumes.bundle.path }}
+
+            env:
+            - name: BUNDLE_STORAGE
+              value: {{ .Values.volumes.bundle.path | quote }}
+
+{{- end }}

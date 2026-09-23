@@ -1,0 +1,75 @@
+## Copyright Peinser BV
+##
+
+## Global configuration that is applicable to all resources and will be used
+## as a default unless specifically overwritten.
+##
+defaults:
+  ## Default common pod properties.
+  ##
+  replicas: 1
+  dnsPolicy: ClusterFirst
+  restartPolicy: Always
+  ## Grafana Loki integration for log scraping.
+  ##
+  loki:
+    enabled: false
+    tenant: null
+  ## Default pod node selector.
+  ##
+  nodeSelector: {}
+  ## Default pod tolerations.
+  ##
+  tolerations: []
+  ## Default pod (anti) affinity.
+  affinity: {}
+  ## Container security context.
+  ##
+  securityContext:
+    runAsUser: 1024
+    runAsGroup: 1024
+    fsGroup: 1024
+    allowPrivilegeEscalation: false
+    privileged: false
+    runAsNonRoot: true
+  ## Default pod resources configuration.
+  ##
+  resources:
+    requests:
+      cpu: 64m
+      memory: 256Mi
+    limits: {}
+## Xarta Database Tool Image
+## ref: https://github.com/peinser/xarta/releases
+##
+image:
+  registry: ghcr.io
+  repository: peinser/xarta/db
+  tag: 0.0.10-dev
+  digest: ""
+  ## Specify a imagePullPolicy
+  ## Defaults to 'Always'
+  ## ref: https://kubernetes.io/docs/concepts/containers/images/#pre-pulled-images
+  ##
+  pullPolicy: Always
+  ## Optionally specify an array of imagePullSecrets.
+  ## Secrets must be manually created in the namespace.
+  ## ref: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
+  ## e.g:
+  ## pullSecrets:
+  ##   - myRegistryKeySecretName
+  ##
+  pullSecrets: []
+  ## Enable development (debug) mode.
+  ##
+  debug: false
+## Database settings; mongodb and postgresql configuration.
+##
+database:
+  ## PostgreSQL settings.
+  ##
+  postgresql:
+    connectionString: null
+  ## Archive PostgreSQL settings. The target database must already exist.
+  archivePostgresql:
+    connectionString: null

@@ -1,0 +1,77 @@
+{{- if .Values.services.search.enabled }}
+{{- $deployment := include "service.name" (dict "release" $.Release "name" "search") }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $deployment }}
+  labels:
+    app: {{ $deployment }}
+    xarta-environment: {{ .Release.Name }}
+spec:
+  replicas: {{ include "deploy.replicas" .Values.services.search }}
+  selector:
+    matchLabels:
+      app: {{ $deployment }}
+  template:
+    metadata:
+      annotations:
+        checksum-search: {{ include (print $.Template.BasePath "/secrets/search.yaml") . | sha256sum }}
+      labels:
+        app: {{ $deployment }}
+        xarta-environment: {{ .Release.Name }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+      {{- include "service.constraints" $ | nindent 6 }}
+      {{ include "service.pullSecrets" $ | nindent 6 -}}
+      volumes:
+      {{- include "temporaryStorage.volume" $ | nindent 6 }}
+      - name: search
+        secret:
+          secretName: {{ .Values.services.search.existingSecret | default (printf "%s-core-search" .Release.Name) }}
+      containers:
+      - name: {{ $deployment }}
+        image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          privileged: false
+          runAsNonRoot: true
+        args: ["services", "--run", "search=latest", "--run", "search=v1"]
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+        volumeMounts:
+        {{- include "temporaryStorage.mount" $ | nindent 8 }}
+        - name: search
+          readOnly: true
+          mountPath: /mnt/config/search.json
+          subPath: search.json
+        env:
+        {{- include "telemetry.env" (dict "root" $ "name" "search") | nindent 8 }}
+        {{- include "postgresql.env" $ | nindent 8 }}
+        - name: NATS_SERVERS
+          value: {{ .Values.nats.servers | quote }}
+        - name: NATS_WORKERS
+          value: {{ .Values.services.search.settings.nats.workers | default 10 | quote }}
+        - name: SEARCH_CONFIGURATIONS_CONFIG_PATH
+          value: /mnt/config/search.json
+        {{- include "temporaryStorage.env" $ | nindent 8 }}
+        - name: ARCHIVE_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "archive") }}/api/archive
+        - name: ARCHIVE_SERVICE_TIMEOUT
+          value: {{ .Values.services.archive.settings.timeout | default 10 | quote }}
+        - name: BUNDLE_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "bundle") }}/api/bundle
+        - name: BUNDLE_SERVICE_TIMEOUT
+          value: {{ .Values.services.bundle.settings.timeout | default 10 | quote }}
+        - name: RENDER_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "render") }}/api/render
+        - name: RENDER_SERVICE_TIMEOUT
+          value: {{ .Values.services.render.settings.timeout | default 10 | quote }}
+        {{- include "resources" $ | nindent 8 }}
+        {{- include "probes" $ | nindent 8 }}
+{{- end }}

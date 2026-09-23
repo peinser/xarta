@@ -1,0 +1,6 @@
+{
+  "steps": [
+    {"provider_state": "TRANSIT", "outcome": "submitted", "operation_resolved": false},
+    {"provider_state": "SENT", "outcome": "delivery_confirmed", "operation_resolved": true}
+  ]
+}

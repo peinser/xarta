@@ -1,0 +1,81 @@
+{{- if .Values.services.mcp.enabled }}
+{{- $deployment := include "service.name" (dict "release" $.Release "name" "mcp") -}}
+{{- $intake := include "service.name" (dict "release" $.Release "name" "intake") -}}
+{{- $documenttype := include "service.name" (dict "release" $.Release "name" "documenttype") -}}
+{{- $archive := include "service.name" (dict "release" $.Release "name" "archive") -}}
+{{- $allowedHosts := list $deployment (printf "%s:*" $deployment) -}}
+{{- $allowedOrigins := list -}}
+{{- range $host := .Values.defaults.ingress.hosts -}}
+{{- $allowedHosts = append $allowedHosts $host.dns -}}
+{{- $allowedHosts = append $allowedHosts (printf "%s:*" $host.dns) -}}
+{{- $scheme := ternary "https" "http" $host.tls -}}
+{{- $allowedOrigins = append $allowedOrigins (printf "%s://%s" $scheme $host.dns) -}}
+{{- end }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: {{ $deployment }}
+    xarta-environment: {{ .Release.Name }}
+  name: {{ $deployment }}
+spec:
+  replicas: {{ include "deploy.replicas" .Values.services.mcp }}
+  selector:
+    matchLabels:
+      app: {{ $deployment }}
+  template:
+    metadata:
+      labels:
+        app: {{ $deployment }}
+        xarta-environment: {{ .Release.Name }}
+        {{- if .Values.defaults.loki.enabled }}
+        loki: {{ .Values.defaults.loki.tenant }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+
+      {{- include "service.constraints" $ | nindent 6 }}
+
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: {{ .Values.defaults.restartPolicy }}
+      {{ include "service.pullSecrets" $ | nindent 6 -}}
+
+      containers:
+      - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ $deployment }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+        args: ["mcp"]
+
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+
+        env:
+        {{- include "telemetry.env" (dict "root" $ "name" "mcp") | nindent 8 }}
+        - name: MCP_INTAKE_BASE_URL
+          value: http://{{ $intake }}/api/v1/intake
+        - name: MCP_DOCUMENT_TYPE_BASE_URL
+          value: http://{{ $documenttype }}/api/v1/document-type
+        - name: MCP_ARCHIVE_BASE_URL
+          value: http://{{ $archive }}/api/v1/archive
+        - name: MCP_REQUEST_TIMEOUT_SECONDS
+          value: {{ .Values.services.mcp.settings.requestTimeoutSeconds | quote }}
+        - name: MCP_ARCHIVE_MAX_RESOURCE_BYTES
+          value: {{ .Values.services.mcp.settings.archiveMaxResourceBytes | quote }}
+        - name: MCP_ALLOWED_HOSTS
+          value: {{ join "," $allowedHosts | quote }}
+        - name: MCP_ALLOWED_ORIGINS
+          value: {{ join "," $allowedOrigins | quote }}
+
+        {{- include "resources" $ | nindent 8 }}
+        {{- include "probes" $ | nindent 8 }}
+{{- end }}

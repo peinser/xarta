@@ -1,0 +1,8 @@
+{{/*
+A collection of base services with an internal load balancer.
+*/}}
+
+{{ range $k, $v := .Values.services }}
+{{ include "service.svc" (dict "release" $.Release "name" $k "service" $v) }}
+---
+{{ end }}

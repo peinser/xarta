@@ -1,0 +1,21 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools>=68"]
+
+[project]
+name = "xarta-postal-station"
+version = "0.1.0"
+description = "Headless Xarta postal production station renderer and printer client"
+requires-python = ">=3.11"
+dependencies = ["pyhanko[image-support]", "python-barcode"]
+
+[project.scripts]
+xarta-postal-station = "postal_station.cli:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.black]
+line-length = 120
+target-version = ["py311"]

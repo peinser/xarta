@@ -1,0 +1,9 @@
+{
+  "capacity_pools": {
+    "brussels-letters": {
+      "timezone": "Europe/Brussels",
+      "daily_admission_limit": -1,
+      "overflow": "queue"
+    }
+  }
+}

@@ -1,0 +1,105 @@
+{{- if .Values.services.doccle.enabled }}
+{{- $deployment := include "service.name" (dict "release" $.Release "name" "doccle") }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $deployment }}
+  labels:
+    app: {{ $deployment }}
+    xarta-environment: {{ .Release.Name }}
+spec:
+  replicas: {{ include "deploy.replicas" .Values.services.doccle }}
+  selector:
+    matchLabels:
+      app: {{ $deployment }}
+  template:
+    metadata:
+      annotations:
+        {{- if not .Values.services.doccle.existingSecret }}
+        checksum-doccle: {{ include (print $.Template.BasePath "/secrets/doccle.yaml") . | sha256sum }}
+        {{- end }}
+        checksum-postgresql: {{ include (print $.Template.BasePath "/secrets/postgresql-owners.yaml") . | sha256sum }}
+      labels:
+        app: {{ $deployment }}
+        xarta-environment: {{ .Release.Name }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+      {{- include "service.constraints" $ | nindent 6 }}
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: {{ .Values.defaults.restartPolicy }}
+      {{ include "service.pullSecrets" $ | nindent 6 -}}
+      volumes:
+      {{- include "temporaryStorage.volume" $ | nindent 6 }}
+      - name: doccle
+        secret:
+          secretName: {{ .Values.services.doccle.existingSecret | default (printf "%s-core-doccle" .Release.Name) }}
+          defaultMode: 0400
+      containers:
+      - name: {{ $deployment }}
+        image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+        args: [
+          "services",
+          {{ if $.Values.image.debug -}}
+          --debug,
+          {{- end }}
+          "--run", "doccle=latest",
+          "--run", "doccle=v1"
+        ]
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+        volumeMounts:
+        {{- include "temporaryStorage.mount" $ | nindent 8 }}
+        - name: doccle
+          readOnly: true
+          mountPath: /mnt/config/doccle.json
+          subPath: doccle.json
+        env:
+        {{- include "telemetry.env" (dict "root" $ "name" "doccle") | nindent 8 }}
+        {{- include "tracking-postgresql.env" $ | nindent 8 }}
+        {{- include "doccle-postgresql.env" $ | nindent 8 }}
+        - name: NATS_SERVERS
+          value: {{ .Values.nats.servers | quote }}
+        - name: NATS_WORKERS
+          value: {{ .Values.services.doccle.settings.nats.workers | default 10 | quote }}
+        {{- include "temporaryStorage.env" $ | nindent 8 }}
+        - name: DOCCLE_CONFIGURATIONS_CONFIG_PATH
+          value: /mnt/config/doccle.json
+        - name: DOCCLE_CONTROL_PLANE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.services.doccle.existingSecret | default (printf "%s-core-doccle" .Release.Name) }}
+              key: control-plane-token
+        - name: DOCCLE_CALLBACKS_ENABLED
+          value: {{ .Values.services.doccle.settings.callbacks.enabled | default false | quote }}
+        {{- if .Values.services.doccle.settings.callbacks.enabled }}
+        - name: DOCCLE_CALLBACK_CERTIFICATE_FINGERPRINTS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.services.doccle.existingSecret | default (printf "%s-core-doccle" .Release.Name) }}
+              key: callback-certificate-fingerprints
+        {{- end }}
+        - name: ARCHIVE_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "archive") }}/api/archive
+        - name: ARCHIVE_SERVICE_TIMEOUT
+          value: {{ .Values.services.archive.settings.timeout | default 10 | quote }}
+        - name: BUNDLE_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "bundle") }}/api/bundle
+        - name: BUNDLE_SERVICE_TIMEOUT
+          value: {{ .Values.services.bundle.settings.timeout | default 10 | quote }}
+        - name: RENDER_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "render") }}/api/render
+        - name: RENDER_SERVICE_TIMEOUT
+          value: {{ .Values.services.render.settings.timeout | default 10 | quote }}
+        {{- include "resources" $ | nindent 8 }}
+        {{- include "probes" $ | nindent 8 }}
+{{- end }}

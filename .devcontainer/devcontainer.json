@@ -1,0 +1,39 @@
+{
+	"name": "Xarta",
+	"dockerComposeFile": "../.dev/compose.yml",
+	"service": "app_xarta_core",
+	"workspaceFolder": "/workspace",
+	"features": {
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+			"moby": false
+		}
+	},
+
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"python.defaultInterpreterPath": "/opt/pysetup/.venv/bin/python"
+			},
+			"extensions": [
+				"ms-python.python",
+				"ms-python.vscode-pylance",
+				"ms-python.black-formatter",
+				"charliermarsh.ruff",
+				"ms-toolsai.jupyter",
+				"Tim-Koehler.helm-intellisense",
+				"github.vscode-github-actions",
+				"ms-kubernetes-tools.vscode-kubernetes-tools",
+				"ms-azuretools.vscode-docker"
+			]
+		}
+	},
+
+	"postCreateCommand": "./.devcontainer/startup.sh",
+
+	"forwardPorts": [
+		8181,
+		8000,
+		9000,
+		9001
+	]
+}

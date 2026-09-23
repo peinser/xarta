@@ -1,0 +1,16 @@
+{{- if and .Values.services.mcp.enabled (not .Values.services.intake.enabled) -}}
+{{- fail "services.mcp requires services.intake.enabled=true" -}}
+{{- end -}}
+{{- if and .Values.services.mcp.enabled (not .Values.services.documenttype.enabled) -}}
+{{- fail "services.mcp requires services.documenttype.enabled=true" -}}
+{{- end -}}
+{{- if and .Values.services.mcp.enabled (not .Values.services.archive.enabled) -}}
+{{- fail "services.mcp requires services.archive.enabled=true" -}}
+{{- end -}}
+{{- if and .Values.services.mcp.enabled (le (float64 .Values.services.mcp.settings.requestTimeoutSeconds) 0.0) -}}
+{{- fail "services.mcp.settings.requestTimeoutSeconds must be greater than zero" -}}
+{{- end -}}
+{{- $archiveMaxResourceBytes := int .Values.services.mcp.settings.archiveMaxResourceBytes -}}
+{{- if and .Values.services.mcp.enabled (or (le $archiveMaxResourceBytes 0) (gt $archiveMaxResourceBytes 8388608)) -}}
+{{- fail "services.mcp.settings.archiveMaxResourceBytes must be between 1 and 8388608" -}}
+{{- end -}}

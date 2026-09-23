@@ -1,0 +1,86 @@
+{{- $transform := (get .Values.services "transform") | default dict -}}
+{{- if $transform.enabled }}
+{{- $deployment := include "service.name" (dict "release" $.Release "name" "transform") -}}
+{{- $settings := (get $transform "settings") | default dict -}}
+{{- $nats := (get $settings "nats") | default dict -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: {{ $deployment }}
+    xarta-environment: {{ .Release.Name }}
+  name: {{ $deployment }}
+spec:
+  replicas: {{ (get $transform "replicas") | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ $deployment }}
+  template:
+    metadata:
+      labels:
+        app: {{ $deployment }}
+        xarta-environment: {{ .Release.Name }}
+        {{- if .Values.defaults.loki.enabled }}
+        loki: {{ .Values.defaults.loki.tenant }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+      {{- include "service.constraints" $ | nindent 6 }}
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: {{ .Values.defaults.restartPolicy }}
+      {{ include "service.pullSecrets" $ | nindent 6 -}}
+      volumes:
+      {{- include "temporaryStorage.volume" $ | nindent 6 }}
+      containers:
+      - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ $deployment }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+        args: [
+          "services",
+          {{ if $.Values.image.debug -}}
+          --debug,
+          {{- end }}
+          "--run", "transform=latest",
+          "--run", "transform=v1"
+        ]
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+        volumeMounts:
+        {{- include "temporaryStorage.mount" $ | nindent 8 }}
+        env:
+        {{- include "telemetry.env" (dict "root" $ "name" "transform") | nindent 8 }}
+        - name: NATS_SERVERS
+          value: {{ .Values.nats.servers | quote }}
+        - name: NATS_WORKERS
+          value: {{ (get $nats "workers") | default 10 | quote }}
+        {{- include "temporaryStorage.env" $ | nindent 8 }}
+        - name: TRANSFORM_GOTENBERG_ENDPOINT
+          value: {{ (get $settings "endpoint") | default (printf "http://%s-template-engine-gotenberg:3000" .Release.Name) | quote }}
+        - name: TRANSFORM_GOTENBERG_TIMEOUT
+          value: {{ (get $settings "timeout") | default 30 | quote }}
+        - name: TRANSFORM_MAX_BYTES
+          value: {{ (get $settings "maxBytes") | default 52428800 | quote }}
+        - name: ARCHIVE_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "archive") }}/api/archive
+        - name: ARCHIVE_SERVICE_TIMEOUT
+          value: {{ .Values.services.archive.settings.timeout | default 10 | quote }}
+        - name: BUNDLE_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "bundle") }}/api/bundle
+        - name: BUNDLE_SERVICE_TIMEOUT
+          value: {{ .Values.services.bundle.settings.timeout | default 10 | quote }}
+        - name: RENDER_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "render") }}/api/render
+        - name: RENDER_SERVICE_TIMEOUT
+          value: {{ .Values.services.render.settings.timeout | default 10 | quote }}
+        {{- include "resources" $ | nindent 8 }}
+        {{- include "probes" $ | nindent 8 }}
+{{- end }}

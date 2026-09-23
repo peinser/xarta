@@ -1,0 +1,89 @@
+{{- if .Values.services.sftp.enabled }}
+{{- $deployment := include "service.name" (dict "release" $.Release "name" "sftp") -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: {{ $deployment }}
+    xarta-environment: {{ .Release.Name }}
+  name: {{ $deployment }}
+spec:
+  replicas: {{ include "deploy.replicas" .Values.services.sftp }}
+  selector:
+    matchLabels:
+      app: {{ $deployment }}
+  template:
+    metadata:
+      annotations:
+        {{- if not .Values.services.sftp.existingSecret }}
+        checksum-sftp-config: {{ include (print $.Template.BasePath "/secrets/sftp.yaml") . | sha256sum }}
+        {{- end }}
+        checksum-postgresql: {{ include (print $.Template.BasePath "/secrets/postgresql.yaml") . | sha256sum }}
+      labels:
+        app: {{ $deployment }}
+        xarta-environment: {{ .Release.Name }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+      {{- include "service.constraints" $ | nindent 6 }}
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: {{ .Values.defaults.restartPolicy }}
+      {{ include "service.pullSecrets" $ | nindent 6 -}}
+      volumes:
+      {{- include "temporaryStorage.volume" $ | nindent 6 }}
+      - name: sftp
+        secret:
+          secretName: {{ .Values.services.sftp.existingSecret | default (printf "%s-core-sftp" .Release.Name) }}
+          defaultMode: 0400
+      containers:
+      - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ $deployment }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+        args: [
+          "services",
+          {{ if $.Values.image.debug -}}
+          --debug,
+          {{- end }}
+          "--run", "sftp=latest",
+          "--run", "sftp=v1"
+        ]
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+        volumeMounts:
+        {{- include "temporaryStorage.mount" $ | nindent 8 }}
+        - name: sftp
+          readOnly: true
+          mountPath: /mnt/config/sftp
+        env:
+        {{- include "telemetry.env" (dict "root" $ "name" "sftp") | nindent 8 }}
+        {{- include "postgresql.env" $ | nindent 8 }}
+        - name: NATS_SERVERS
+          value: {{ .Values.nats.servers | quote }}
+        - name: NATS_WORKERS
+          value: {{ .Values.services.sftp.settings.nats.workers | default 10 | quote }}
+        {{- include "temporaryStorage.env" $ | nindent 8 }}
+        - name: SFTP_CONFIGURATIONS_CONFIG_PATH
+          value: /mnt/config/sftp/sftp.json
+        - name: ARCHIVE_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "archive") }}/api/archive
+        - name: ARCHIVE_SERVICE_TIMEOUT
+          value: {{ .Values.services.archive.settings.timeout | default 10 | quote }}
+        - name: BUNDLE_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "bundle") }}/api/bundle
+        - name: BUNDLE_SERVICE_TIMEOUT
+          value: {{ .Values.services.bundle.settings.timeout | default 10 | quote }}
+        - name: RENDER_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "render") }}/api/render
+        - name: RENDER_SERVICE_TIMEOUT
+          value: {{ .Values.services.render.settings.timeout | default 10 | quote }}
+        {{- include "resources" $ | nindent 8 }}
+        {{- include "probes" $ | nindent 8 }}
+{{- end }}

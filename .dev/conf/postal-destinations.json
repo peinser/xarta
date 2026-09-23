@@ -1,0 +1,14 @@
+{
+  "local-brussels": {
+    "kind": "postal",
+    "adapter": "local",
+    "current_revision": "development-v1",
+    "revisions": {
+      "development-v1": {
+        "execution_mode": "tracked",
+        "local_profile": "brussels-letters-v1",
+        "capacity_pool": "brussels-letters"
+      }
+    }
+  }
+}

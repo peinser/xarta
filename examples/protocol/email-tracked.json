@@ -1,0 +1,23 @@
+{
+  "id": "10000000-0000-0000-0000-000000000001",
+  "correlation_id": "20000000-0000-0000-0000-000000000001",
+  "dag": {
+    "id": "30000000-0000-0000-0000-000000000001",
+    "kind": "email",
+    "destination": "transactional-email",
+    "to": "alice@example.com",
+    "cc": ["bob@example.com"],
+    "bcc": [],
+    "sender": "billing@example.com",
+    "subject": "Invoice INV-2026-0042",
+    "body": {"plain": "Please find your invoice attached."},
+    "attachments": [],
+    "on": {
+      "mailbox_full": [{"id": "40000000-0000-0000-0000-000000000001", "kind": "debug"}],
+      "recipient_unknown": [{"id": "50000000-0000-0000-0000-000000000001", "kind": "debug"}],
+      "all_delivered": [{"id": "60000000-0000-0000-0000-000000000001", "kind": "debug"}],
+      "partially_delivered": [{"id": "70000000-0000-0000-0000-000000000001", "kind": "debug"}],
+      "execution_failed": [{"id": "80000000-0000-0000-0000-000000000001", "kind": "debug"}]
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "default-archive": {
+    "kind": "archive",
+    "adapter": "xarta-http-archive",
+    "current_revision": "v1",
+    "revisions": {
+      "v1": {
+        "endpoint": "http://archive:8000/api/archive",
+        "timeout": 10.0,
+        "concurrency": 10
+      }
+    }
+  }
+}

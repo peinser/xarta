@@ -1,0 +1,93 @@
+{{- $job :=  printf "%s-db-tools-deploy-database" .Release.Name -}}
+{{- $archiveJob := printf "%s-db-tools-deploy-archive-database" .Release.Name -}}
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $job }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation
+    "helm.sh/hook-weight": "3"
+spec:
+  template:
+    metadata:
+      labels:
+        app: {{ $job }}
+        {{- if .Values.defaults.loki.enabled }}
+        loki: {{ .Values.defaults.loki.tenant }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+
+      {{- include "job.constraints" $ | nindent 6 }}
+
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: Never
+      {{ include "job.pullSecrets" $ | nindent 6 -}}
+
+      containers:
+
+      - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ $job }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+
+        env:
+        - name: POSTGRESQL_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-db-tools-postgresql
+              key: connectionString
+        - name: SQITCH_DIRECTORY
+          value: "."
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $archiveJob }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation
+    "helm.sh/hook-weight": "2"
+spec:
+  template:
+    metadata:
+      labels:
+        app: {{ $archiveJob }}
+        {{- if .Values.defaults.loki.enabled }}
+        loki: {{ .Values.defaults.loki.tenant }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+      {{- include "job.constraints" $ | nindent 6 }}
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: Never
+      {{ include "job.pullSecrets" $ | nindent 6 -}}
+      containers:
+      - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ $archiveJob }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+        env:
+        - name: POSTGRESQL_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-db-tools-archive-postgresql
+              key: connectionString
+        - name: SQITCH_DIRECTORY
+          value: archive

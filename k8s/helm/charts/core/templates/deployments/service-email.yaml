@@ -1,0 +1,103 @@
+{{ if .Values.services.email.enabled }}
+
+{{- $deployment := include "service.name" (dict "release" $.Release "name" "email") }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: {{ $deployment }}
+    xarta-environment: {{ .Release.Name }}
+  name: {{ $deployment }}
+spec:
+  replicas: {{ include "deploy.replicas" .Values.services.email }}
+  selector:
+    matchLabels:
+      app: {{ $deployment }}
+  template:
+    metadata:
+      annotations:
+        checksum-email-config: {{ .Values.services.email.existingSecretChecksum | default (include (print $.Template.BasePath "/secrets/email.yaml") . | sha256sum) | quote }}
+        checksum-postgresql: {{ include (print $.Template.BasePath "/secrets/postgresql.yaml") . | sha256sum }}
+      labels:
+        app: {{ $deployment }}
+        xarta-environment: {{ .Release.Name }}
+        {{- if .Values.defaults.loki.enabled }}
+        loki: {{ .Values.defaults.loki.tenant }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+
+      {{- include "service.constraints" $ | nindent 6 }}
+
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: {{ .Values.defaults.restartPolicy }}
+      {{ include "service.pullSecrets" $ | nindent 6 -}}
+
+      volumes:
+      {{- include "temporaryStorage.volume" $ | nindent 6 }}
+      - name: email
+        secret:
+          secretName: {{ .Values.services.email.existingSecret | default (printf "%s-core-email" $.Release.Name) }}
+
+      containers:
+
+      - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ $deployment }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+        args: [
+          "services",
+          {{ if $.Values.image.debug -}}
+          --debug,
+          {{- end }}
+          "--run", "email=latest",
+          "--run", "email=v1"
+        ]
+
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+
+        volumeMounts:
+        {{- include "temporaryStorage.mount" $ | nindent 8 }}
+        - name: email
+          readOnly: true
+          mountPath: /mnt/config/email
+
+        env:
+        {{- include "telemetry.env" (dict "root" $ "name" "email") | nindent 8 }}
+        {{- include "postgresql.env" $ | nindent 8 }}
+        - name: RENDER_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "render") }}/api/render
+        - name: RENDER_SERVICE_TIMEOUT
+          value: {{ .Values.services.render.settings.timeout | default 10 | quote }}
+        - name: NATS_SERVERS
+          value: {{ .Values.nats.servers | quote }}
+        - name: NATS_WORKERS
+          value: {{ .Values.services.email.settings.nats.workers | default 10 | quote }}
+        {{- include "temporaryStorage.env" $ | nindent 8 }}
+        - name: EMAIL_CONFIGURATIONS_CONFIG_PATH
+          value: "/mnt/config/email/email.json"
+        - name: EMAIL_RECONCILIATION_BATCH_SIZE
+          value: {{ .Values.services.email.settings.reconciliation.batchSize | quote }}
+        - name: EMAIL_RECONCILIATION_CONCURRENCY
+          value: {{ .Values.services.email.settings.reconciliation.concurrency | quote }}
+        - name: EMAIL_RECONCILIATION_INTERVAL_SECONDS
+          value: {{ .Values.services.email.settings.reconciliation.intervalSeconds | quote }}
+        - name: EMAIL_RECONCILIATION_LEASE_SECONDS
+          value: {{ .Values.services.email.settings.reconciliation.leaseSeconds | quote }}
+        - name: EMAIL_RECONCILIATION_MAX_BACKOFF_SECONDS
+          value: {{ .Values.services.email.settings.reconciliation.maxBackoffSeconds | quote }}
+
+        {{- include "resources" $ | nindent 8 }}
+        {{- include "probes" $ | nindent 8 }}
+
+{{- end }}

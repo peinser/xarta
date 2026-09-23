@@ -1,0 +1,93 @@
+{{- if and .Values.services.render.enabled .Values.services.render.previewPool.enabled }}
+
+{{- $deployment := include "service.name" (dict "release" $.Release "name" "render-preview") -}}
+{{- $templateEngineConfigMap := include "service.name" (dict "release" $.Release "name" "render") -}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: {{ $deployment }}
+    xarta-environment: {{ .Release.Name }}
+    app.kubernetes.io/name: xarta
+    app.kubernetes.io/component: render
+    xarta.peinser.com/render-pool: preview
+  name: {{ $deployment }}
+spec:
+  replicas: {{ .Values.services.render.previewPool.replicas }}
+  selector:
+    matchLabels:
+      app: {{ $deployment }}
+  template:
+    metadata:
+      annotations:
+        # Both pools must roll from the same template-engine configuration.
+        checksum-template-engines-config: {{ include (print $.Template.BasePath "/config-maps/template-engines.yaml") . | sha256sum }}
+        {{- with .Values.services.render.templateRevision }}
+        xarta.peinser.com/template-revision: {{ . | quote }}
+        {{- end }}
+      labels:
+        app: {{ $deployment }}
+        xarta-environment: {{ .Release.Name }}
+        app.kubernetes.io/name: xarta
+        app.kubernetes.io/component: render
+        xarta.peinser.com/render-pool: preview
+        {{- if .Values.defaults.loki.enabled }}
+        loki: {{ .Values.defaults.loki.tenant }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+
+      {{- include "service.constraints" $ | nindent 6 }}
+
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: {{ .Values.defaults.restartPolicy }}
+      {{ include "service.pullSecrets" $ | nindent 6 -}}
+
+      volumes:
+      - name: template-engines-config
+        configMap:
+          name: {{ $templateEngineConfigMap }}
+
+      containers:
+      - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ $deployment }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+        args: [
+          "services",
+          {{ if $.Values.image.debug -}}
+          --debug,
+          {{- end }}
+          "--run", "render=latest",
+          "--run", "render=v1"
+        ]
+
+        volumeMounts:
+        - name: template-engines-config
+          readOnly: true
+          mountPath: /app/config/template-engines.json
+          subPath: template-engines.json
+
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+
+        env:
+        {{- include "telemetry.env" (dict "root" $ "name" "render-preview") | nindent 8 }}
+        - name: DOCUMENT_TYPE_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "documenttype") }}/api/document-type
+        - name: DOCUMENT_TYPE_SERVICE_TIMEOUT
+          value: {{ .Values.services.render.settings.timeout | default 30.0 | quote }}
+
+        {{- include "resources" $ | nindent 8 }}
+        {{- include "probes" $ | nindent 8 }}
+
+{{- end }}

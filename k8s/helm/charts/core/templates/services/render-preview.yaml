@@ -1,0 +1,14 @@
+{{- if and .Values.services.render.enabled .Values.services.render.previewPool.enabled }}
+{{- $service := include "service.name" (dict "release" $.Release "name" "render-preview") -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $service }}
+spec:
+  selector:
+    app: {{ $service }}
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 8000
+{{- end }}

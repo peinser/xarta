@@ -1,0 +1,142 @@
+{{ if .Values.services.signature.enabled }}
+
+{{- $deployment := include "service.name" (dict "release" $.Release "name" "signature") }}
+{{- $configuration := .Values.services.signature.configuration }}
+{{- $configurationConfigMap := $configuration.existingConfigMap | default (printf "%s-core-signature" .Release.Name) }}
+{{- $timestamps := .Values.services.signature.timestampProviders }}
+{{- $timestampConfigMap := $timestamps.existingConfigMap | default (printf "%s-core-timestamp-providers" .Release.Name) }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: {{ $deployment }}
+    xarta-environment: {{ .Release.Name }}
+  name: {{ $deployment }}
+spec:
+  replicas: {{ include "deploy.replicas" .Values.services.signature }}
+  selector:
+    matchLabels:
+      app: {{ $deployment }}
+  template:
+    metadata:
+      annotations:
+        # The following configuration forces the deployment to reconfigure whenever the signing keys have been modified.
+        checksum-secret-signing-keys: {{ include (print $.Template.BasePath "/secrets/signing-keys.yaml") . | sha256sum }}
+        checksum-signature-configuration: {{ $configuration.config | default $configuration.existingConfigMap | toJson | sha256sum }}
+        {{- if or $timestamps.existingConfigMap $timestamps.config }}
+        checksum-timestamp-provider-configuration: {{ dict "config" $timestamps.config "trustMaterial" $timestamps.trustMaterial "existingConfigMap" $timestamps.existingConfigMap "existingConfigMapChecksum" $timestamps.existingConfigMapChecksum | toJson | sha256sum }}
+        {{- end }}
+        checksum-postgresql: {{ include (print $.Template.BasePath "/secrets/postgresql.yaml") . | sha256sum }}
+      labels:
+        app: {{ $deployment }}
+        xarta-environment: {{ .Release.Name }}
+        {{- if .Values.defaults.loki.enabled }}
+        loki: {{ .Values.defaults.loki.tenant }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+
+      {{- include "service.constraints" $ | nindent 6 }}
+
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: {{ .Values.defaults.restartPolicy }}
+      {{ include "service.pullSecrets" $ | nindent 6 -}}
+
+      volumes:
+      {{- include "temporaryStorage.volume" $ | nindent 6 }}
+      - name: signing-keys
+        secret:
+          secretName: {{ $.Release.Name }}-signing-keys
+          defaultMode: 0440
+      - name: signature-configuration
+        configMap:
+          name: {{ $configurationConfigMap }}
+      {{- if or $timestamps.existingConfigMap $timestamps.config }}
+      - name: timestamp-provider-configuration
+        configMap:
+          name: {{ $timestampConfigMap }}
+      {{- end }}
+
+      containers:
+
+      - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ $deployment }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+        args: [
+          "services",
+          {{ if $.Values.image.debug -}}
+          --debug,
+          {{- end }}
+          "--run", "signature=latest",
+          "--run", "signature=v1"
+        ]
+
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+
+        volumeMounts:
+        {{- include "temporaryStorage.mount" $ | nindent 8 }}
+        - name: signing-keys
+          readOnly: true
+          mountPath: /mnt/config/certificates/public.pem
+          subPath: publicKey
+        - name: signing-keys
+          readOnly: true
+          mountPath: /mnt/config/certificates/private.pem
+          subPath: privateKey
+        {{- if .Values.services.signature.settings.certificates.b64CertificateChain }}
+        - name: signing-keys
+          readOnly: true
+          mountPath: /mnt/config/certificates/chain.pem
+          subPath: certificateChain
+        {{- end }}
+        - name: signature-configuration
+          readOnly: true
+          mountPath: /mnt/config/signature
+        {{- if or $timestamps.existingConfigMap $timestamps.config }}
+        - name: timestamp-provider-configuration
+          readOnly: true
+          mountPath: /mnt/config/timestamp-providers
+        {{- end }}
+
+        env:
+        {{- include "telemetry.env" (dict "root" $ "name" "signature") | nindent 8 }}
+        {{- include "postgresql.env" $ | nindent 8 }}
+        {{- include "temporaryStorage.env" $ | nindent 8 }}
+        - name: SIGNATURE_ADAPTER
+          value: {{ .Values.services.signature.settings.adapter | default "local" | quote }}
+        - name: SIGNATURE_CONFIG_PATH
+          value: /mnt/config/signature/signature.json
+        {{- if or $timestamps.existingConfigMap $timestamps.config }}
+        - name: TIMESTAMP_PROVIDERS_CONFIG_PATH
+          value: /mnt/config/timestamp-providers/timestamp-providers.json
+        {{- end }}
+        - name: SIGNATURE_ALLOW_DEVELOPMENT_POLICIES
+          value: {{ .Values.services.signature.settings.allowDevelopmentPolicies | quote }}
+        - name: DOCUMENT_SIGN_PRIVATE_PEM
+          value: /mnt/config/certificates/private.pem
+        - name: DOCUMENT_SIGN_PUBLIC_PEM
+          value: /mnt/config/certificates/public.pem
+        {{- if .Values.services.signature.settings.certificates.b64CertificateChain }}
+        - name: DOCUMENT_SIGN_CHAIN_PEM
+          value: /mnt/config/certificates/chain.pem
+        {{- end }}
+        - name: NATS_SERVERS
+          value: {{ .Values.nats.servers | quote }}
+        - name: NATS_WORKERS
+          value: {{ .Values.services.signature.settings.nats.workers | default 10 | quote }}
+
+        {{- include "resources" $ | nindent 8 }}
+        {{- include "probes" $ | nindent 8 }}
+
+{{- end }}

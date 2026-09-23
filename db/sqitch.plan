@@ -1,0 +1,29 @@
+%syntax-version=1.0.0
+%project=xarta
+%uri=https://github.com/peinser/xarta
+
+00000.initialize 2024-08-27T09:00:22Z Xarta Labs <xarta@peinser.com> # Initiial database structure
+00001.documents 2024-09-22T08:50:01Z Xarta Labs <xarta@peinser.com> # Add documents for generate-store
+00002.default-document-metadata 2024-10-28T07:20:15Z Xarta Labs <xarta@peinser.com> # Add default document metadata through the document type configuration
+00003.default-content-type 2024-11-09T21:48:41Z Xarta Labs <xarta@peinser.com> # Adds the columns 'default_content_type' to the documents type table
+00004.document-type-can-be-null 2024-11-14T13:46:43Z Xarta Labs <xarta@peinser.com> # Change which allows for the document type to be null\n\nThis is included to allow for the storage of dump binary blobs (images/zip's...)
+00006.document-checksum 2024-12-15T22:19:31Z Xarta Labs <xarta@peinser.com> # Adds the SHA512 checksum to archived documents
+00007.tracked-capabilities 2026-08-26T00:00:00Z Xarta Labs <xarta@peinser.com> # Durable node executions, tracked operations, outcomes, inbox, and outbox
+00008.archive-versioning [00007.tracked-capabilities] 2026-08-28T00:00:00Z Xarta Labs <xarta@peinser.com> # Archive-scoped logical documents, immutable versions, storage pinning, and exact replay
+00009.search-indexing [00007.tracked-capabilities] 2026-08-28T00:00:00Z Xarta Labs <xarta@peinser.com> # Immutable declarative search indexing
+00010.archive-deletion-reconciler [00008.archive-versioning] 2026-08-28T00:00:00Z Xarta Labs <xarta@peinser.com> # Persisted deletion intent, internal lineage, and JetStream reconciliation
+00012.execution-attempt-leases [00007.tracked-capabilities] 2026-08-28T00:00:00Z Xarta Labs <xarta@peinser.com> # Durable worker ownership and stale execution recovery
+00014.doccle-persistence [00007.tracked-capabilities] 2026-08-28T00:00:00Z Xarta Labs <xarta@peinser.com> # Durable Doccle receivers, callbacks, and submissions
+00015.node-execution-identity [00012.execution-attempt-leases] 2026-08-28T00:00:00Z Xarta Labs <xarta@peinser.com> # Bind complete immutable trigger provenance to each execution identity
+00016.doccle-receiver-hardening [00014.doccle-persistence 00015.node-execution-identity] 2026-08-28T00:00:00Z Xarta Labs <xarta@peinser.com> # Leased Receiver provisioning and receipt-ordered callback projection
+00017.provider-account-references [00015.node-execution-identity] 2026-08-28T00:00:00Z Xarta Labs <xarta@peinser.com> # Scope provider references by immutable provider account identity
+00018.payments 2026-08-28T00:00:00Z Xarta Labs <xarta@peinser.com> # Durable quotes, requirements, settlements, replay, and paid-resource outbox
+00019.resend-email-reconciliation [00017.provider-account-references] 2026-08-29T00:00:00Z Xarta Labs <xarta@peinser.com> # Bounded leased reconciliation for asynchronous Resend email operations
+00020.archive-version-pagination [00008.archive-versioning] 2026-08-30T00:00:00Z Xarta Labs <xarta@peinser.com> # Stable keyset pagination for archive version history
+00021.direct-successor-routing [00014.doccle-persistence 00015.node-execution-identity] 2026-08-30T00:00:00Z Xarta Labs <xarta@peinser.com> # Persist execution correlation and remove PostgreSQL successor handoff queues
+00022.archive-database-boundary [00020.archive-version-pagination 00021.direct-successor-routing] 2026-08-30T00:00:00Z Xarta Labs <xarta@peinser.com> # Remove archive-owned objects after safe external database cutover
+00023.postal-local [00007.tracked-capabilities] 2026-08-31T00:00:00Z Xarta Labs <xarta@peinser.com> # Local postal production, capacity, handover, and carrier persistence
+00024.blockchain-payment-authority [00018.payments 00015.node-execution-identity] 2026-08-31T00:00:00Z Xarta Labs <xarta@peinser.com> # Remove the standalone x402 ledger and retain payment provenance only on tracked executions
+00025.search-archive-source [00009.search-indexing] 2026-09-01T00:00:00Z Xarta Labs <xarta@peinser.com> # Unambiguous archive search source identity and lifecycle indexes
+00027.search-metadata-only [00025.search-archive-source] 2026-09-01T00:00:00Z Xarta Labs <xarta@peinser.com> # Remove built-in content extraction from search projections
+00028.archive-search-without-digest [00027.search-metadata-only] 2026-09-01T00:00:00Z Xarta Labs <xarta@peinser.com> # Trust immutable archive version identity without downloading content

@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY public.archive_document_versions_pagination_idx;

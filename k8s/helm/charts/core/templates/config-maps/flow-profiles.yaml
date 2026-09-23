@@ -1,0 +1,14 @@
+{{- if .Values.services.intake.enabled }}
+{{- $profiles := .Values.services.intake.profiles }}
+{{- if and $profiles.existingConfigMap $profiles.config }}
+{{- fail "services.intake.profiles cannot set both existingConfigMap and config" }}
+{{- end }}
+{{- if $profiles.config }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-core-flow-profiles
+data:
+  flow-profiles.json: {{ $profiles.config | toJson | quote }}
+{{- end }}
+{{- end }}

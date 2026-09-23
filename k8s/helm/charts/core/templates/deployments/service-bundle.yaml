@@ -1,0 +1,103 @@
+{{ if .Values.services.bundle.enabled }}
+
+{{- $deployment := include "service.name" (dict "release" $.Release "name" "bundle") }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: {{ $deployment }}
+    xarta-environment: {{ .Release.Name }}
+  name: {{ $deployment }}
+spec:
+  replicas: {{ include "deploy.replicas" .Values.services.bundle }}
+  selector:
+    matchLabels:
+      app: {{ $deployment }}
+  template:
+    metadata:
+      annotations:
+        # The following configuration forces the deployment to reconfigure whenever the cache configuration has been modified.
+        checksum-config-cache: {{ include (print $.Template.BasePath "/config-maps/cache.yaml") . | sha256sum }}
+      labels:
+        app: {{ $deployment }}
+        xarta-environment: {{ .Release.Name }}
+        {{- if .Values.defaults.loki.enabled }}
+        loki: {{ .Values.defaults.loki.tenant }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+
+      {{- include "service.constraints" $ | nindent 6 }}
+
+      dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+      restartPolicy: {{ .Values.defaults.restartPolicy }}
+      {{ include "service.pullSecrets" $ | nindent 6 -}}
+
+      volumes:
+      {{- include "temporaryStorage.volume" $ | nindent 6 }}
+      - name: bundle
+        persistentVolumeClaim:
+          claimName: {{ .Values.volumes.bundle.existingClaim }}
+      - name: cache
+        configMap:
+          name: {{ printf "%s-cache" .Release.Name }}
+          items:
+          - key: cache.json
+            path: cache.json
+
+      containers:
+
+      - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ $deployment }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+          privileged: {{ .Values.defaults.securityContext.privileged }}
+          runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+        args: [
+          "services",
+          {{ if $.Values.image.debug -}}
+          --debug,
+          {{- end }}
+          "--run", "bundle=latest",
+          "--run", "bundle=v1"
+        ]
+
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+
+        volumeMounts:
+        {{- include "temporaryStorage.mount" $ | nindent 8 }}
+        - name: bundle
+          mountPath: {{ .Values.volumes.bundle.path }}
+        - name: cache
+          readOnly: true
+          mountPath: /mnt/config/cache.json
+          subPath: cache.json
+
+        env:
+        {{- include "telemetry.env" (dict "root" $ "name" "bundle") | nindent 8 }}
+        - name: ARCHIVE_SERVICE_ENDPOINT
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "archive") }}/api/archive
+        - name: ARCHIVE_SERVICE_TIMEOUT
+          value: {{ .Values.services.archive.settings.timeout | default 10 | quote }}
+        - name: BUNDLE_STORAGE
+          value: {{ .Values.volumes.bundle.path | quote }}
+        - name: CACHE_CONFIG_PATH
+          value: "/mnt/config/cache.json"
+        - name: NATS_SERVERS
+          value: {{ .Values.nats.servers | quote }}
+        - name: NATS_WORKERS
+          value: {{ .Values.services.bundle.settings.nats.workers | default 10 | quote }}
+        {{- include "temporaryStorage.env" $ | nindent 8 }}
+
+        {{- include "resources" $ | nindent 8 }}
+        {{- include "probes" $ | nindent 8 }}
+
+{{- end }}

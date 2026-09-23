@@ -1,0 +1,50 @@
+{{- if .Values.jobs.expireArchivedDocuments.enabled }}
+{{- $job :=  printf "%s-expire-archived-documents" .Release.Name -}}
+{{- $archive := include "service.name" (dict "release" $.Release "name" "archive") }}
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $job }}
+spec:
+  schedule: {{ .Values.jobs.expireArchivedDocuments.schedule | quote }}
+
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: {{ $job }}
+            {{- if .Values.defaults.loki.enabled }}
+            loki: {{ .Values.defaults.loki.tenant }}
+            {{- end }}
+        spec:
+          automountServiceAccountToken: false
+          securityContext:
+            runAsUser: {{ .Values.defaults.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.defaults.securityContext.runAsGroup }}
+            fsGroup: {{ .Values.defaults.securityContext.fsGroup }}
+
+          dnsPolicy: {{ .Values.defaults.dnsPolicy }}
+          restartPolicy: Never
+
+          containers:
+          - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "image" $ }}
+            imagePullPolicy: {{ .Values.image.pullPolicy }}
+            name: {{ $job }}
+            securityContext:
+              allowPrivilegeEscalation: {{ .Values.defaults.securityContext.allowPrivilegeEscalation }}
+              privileged: {{ .Values.defaults.securityContext.privileged }}
+              runAsNonRoot: {{ .Values.defaults.securityContext.runAsNonRoot }}
+            command: ["python"]
+            args: ["-m", "xarta.bin.jobs", "--run", "expire_archived_documents=latest"]
+
+            env:
+            - name: ARCHIVE_SERVICE_ENDPOINT
+              value: http://{{ $archive }}/api/archive
+            {{- include "archive-postgresql.env" $ | nindent 12 }}
+{{- end }}
