@@ -22,6 +22,7 @@ the business inputs a caller is allowed to provide.
   server-owned flow profiles into those graphs.
 - Renders documents with configured template-engines. For instance, Jinja, Scriptura, or Gotenberg engines.
 - Generates, bundles, signs, versions, archives, and expires documents.
+- Enriches UBL 2.1 invoices and credit notes with embedded attachments; see [UBL editing](docs/ubl.md).
 - Delivers through email, SFTP, webhooks, Doccle, and Peppol. Tracked postal delivery is
   experimental and not ready for production mail; see [Postal](docs/postal.md#status-and-boundaries).
 - Indexes document metadata into PostgreSQL or Elasticsearch-compatible stores such as

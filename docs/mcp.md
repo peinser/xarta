@@ -7,7 +7,7 @@ types, construct workflows, and retrieve archived results. The service uses the 
 Streamable HTTP transport at `POST /api/mcp`. JSON responses are used instead of SSE
 because the current tools do not require server-to-client requests or notifications.
 
-MCP is a protocol facade over the versioned document-type, intake, and archive HTTP APIs.
+MCP is a protocol facade over the versioned document-type, intake, archive, UBL, and Peppol HTTP APIs.
 It owns no domain registry, pricing engine, payment server, execution path, archive
 storage, or workflow state. Each service remains authoritative for its domain; intake
 remains authoritative for flow validation, profile compilation, pricing, x402
@@ -40,6 +40,49 @@ Read-only discovery and preparation tools:
   available and within the configured size limit, an MCP resource link pinned to the
   immutable version.
 - `list_archived_document_versions` returns cursor-paginated immutable version history.
+- `list_ubl_validation_profiles` lists the UBL validator's profiles, releases, and checksums.
+- `validate_ubl_schema` validates an XML string against the UBL schemas without storing it.
+- `validate_ubl_business_rules` validates the schema and business rules; the default
+  profile is `peppol-bis-billing-3`, including its Belgian identifier rules.
+- `check_peppol_participant_registration` performs direct SML/SMP discovery using the
+  four-digit ICD `scheme` and participant `identifier`.
+
+The three UBL tools are advertised only when `MCP_UBL_BASE_URL` is configured; the
+registration tool requires `MCP_PEPPOL_BASE_URL`. These read-only APIs are separate
+from DAG capabilities. When deployed, the `ubl` editing node is also discoverable
+through `get_capabilities` and executable through the existing flow tools.
+
+### Validation and discovery results
+
+Validation tools accept `xml` as a Unicode string, sent as UTF-8 XML with no JSON
+wrapper. Its XML declaration must declare UTF-8 or omit the encoding. Input size is
+checked in UTF-8 bytes before forwarding. `validate_ubl_business_rules` additionally
+accepts `profile`; call `list_ubl_validation_profiles` to discover available profiles.
+The UBL service remains authoritative for all XML/schema/business-rule decisions.
+
+```json
+{"xml": "<Invoice xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:Invoice-2\">...</Invoice>", "profile": "peppol-bis-billing-3"}
+```
+
+Registration tool arguments:
+
+```json
+{"scheme": "0208", "identifier": "0308357159"}
+```
+
+All four tools preserve the normal MCP proxy envelope `{"status": 200, "body": {...}}`.
+Inspect the body: validation failures can have HTTP 200 and `valid: false`; engine
+unavailability retains HTTP 503 and `valid: null`. Registration retains
+`registered: true`, `false`, or `null`, along with `status`, `definitive`, `retryable`,
+and the complete evidence list. **Indeterminate is never converted to unregistered.**
+An MCP-to-service transport failure is a tool error, not a fabricated validation or
+registration conclusion. No automatic retry, storage write, or submission is made.
+
+All four tools are read-only, non-destructive, and idempotent in side effects. The
+registration tool is marked open-world because its service contacts DNS/SMP servers;
+the validation tools run against local pinned rules. Registration does not prove
+Access Point liveness or support for a particular invoice type. See
+[UBL validation](ubl-validation.md) and [Peppol discovery](peppol-discovery.md).
 
 Execution tools:
 
@@ -136,7 +179,7 @@ reconciliation remain capabilities of the submitted workflow.
 ## Deployment And Security
 
 The MCP process runs in its own Deployment and calls the versioned document-type, intake,
-and archive services over internal ClusterIPs. It has no database, NATS, storage, or
+archive, and configured UBL/Peppol services over internal ClusterIPs. It has no database, NATS, storage, or
 provider credentials. The
 transport validates `Host` and browser `Origin` values using the configured ingress
 hosts to prevent DNS rebinding.
@@ -147,11 +190,34 @@ Configuration:
 MCP_INTAKE_BASE_URL
 MCP_DOCUMENT_TYPE_BASE_URL
 MCP_ARCHIVE_BASE_URL
+MCP_UBL_BASE_URL
+MCP_PEPPOL_BASE_URL
 MCP_REQUEST_TIMEOUT_SECONDS
+MCP_VALIDATION_TIMEOUT_SECONDS
+MCP_UBL_MAX_DOCUMENT_BYTES
 MCP_ARCHIVE_MAX_RESOURCE_BYTES
 MCP_ALLOWED_HOSTS
 MCP_ALLOWED_ORIGINS
 ```
+
+The two new base URLs are optional; leave them unset to omit their tools. Empty strings
+are not valid URLs. `MCP_VALIDATION_TIMEOUT_SECONDS` defaults to 35 seconds, allowing
+the UBL service's default 30-second deadline to produce its structured result. Keep it
+above the deployed UBL deadline. Registration uses `MCP_REQUEST_TIMEOUT_SECONDS`;
+keep that above the Peppol discovery total deadline when you want service-level evidence.
+`MCP_UBL_MAX_DOCUMENT_BYTES` defaults to 10 MiB, accepts values from 1 to 10 MiB, and
+can be lowered independently of the service's own limit.
+
+All proxy clients share MCP's lifespan-managed HTTP session, including its configured
+Xarta User-Agent. URLs are deployment-owned; tools do not accept arbitrary service URLs.
+Read-service requests do not follow redirects when forwarding documents.
+
+`make mcp` and the development Compose configuration point the new tools at the
+standalone runtime. The split Compose stack has an optional `mcp` profile; to enable
+registration there, also run the `peppol` profile and set
+`MCP_PEPPOL_BASE_URL=http://peppol:8000/api/v1/peppol`. Helm supplies each optional URL
+only when the corresponding service is enabled, with bounds under
+`services.mcp.settings.validationTimeoutSeconds` and `ublMaxDocumentBytes`.
 
 `services.mcp.enabled` requires the intake, document-type, and archive services. Public ingress is independently
 controlled by `services.mcp.ingress.enabled` and is disabled by default. Xarta does not

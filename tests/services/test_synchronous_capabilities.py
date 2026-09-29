@@ -19,6 +19,7 @@ from xarta.services.v1.sftp.nats import SFTPNATSModel
 from xarta.services.v1.signature.nats import SignatureNATSModel
 from xarta.services.v1.signature.nats import _worker as sign
 from xarta.services.v1.transform.nats import TransformNATSModel
+from xarta.services.v1.ubl.nats import UBLNATSModel
 from xarta.services.v1.webhook.nats import WebhookNATSModel
 from xarta.services.v1.webhook.nats import _worker as webhook
 
@@ -34,6 +35,7 @@ from xarta.services.v1.webhook.nats import _worker as webhook
         SFTPNATSModel,
         SignatureNATSModel,
         TransformNATSModel,
+        UBLNATSModel,
         WaitForArchiveNATSModel,
         WebhookNATSModel,
     ],

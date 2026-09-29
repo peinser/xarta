@@ -13,7 +13,7 @@ from xarta.protocol.dag.transform import TransformNode
 def test_transform_pricing_resolves_gotenberg_binding_and_single_activation() -> None:
     root = TransformNode(
         convert={
-            "document": {"source": "generate", "id": str(uuid4())},
+            "document": {"id": str(uuid4())},
             "out": str(uuid4()),
             "content_type": "application/pdf",
         },

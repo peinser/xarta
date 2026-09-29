@@ -24,8 +24,8 @@ from xarta.nats.sanic import SanicNATSJobsConsumerModel
 from xarta.nats.sanic import SanicNATSSynchronousRequestsConsumerModel
 from xarta.protocol.dag import CapabilityResult
 from xarta.protocol.dag import OutcomeEmission
-from xarta.protocol.dag.archive.constants import ARCHIVE_SERVICE_ENDPOINT
-from xarta.protocol.dag.archive.constants import ARCHIVE_SERVICE_TIMEOUT
+from xarta.protocol.document.archive import ARCHIVE_SERVICE_ENDPOINT
+from xarta.protocol.document.archive import ARCHIVE_SERVICE_TIMEOUT
 from xarta.protocol.dag.bundle import BundleNode
 from xarta.protocol.document.source import DocumentSourceResult
 from xarta.protocol.document.type import DocumentTypeIdentifier

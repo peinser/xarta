@@ -65,9 +65,7 @@ def flow() -> tuple[dict[str, Any], dict[str, str]]:
                     "version_id": ids["version_one"],
                     "document_type": None,
                     "metadata": {"original_filename": "input-one.bin"},
-                    "representations": [
-                        {"source": {"source": "generate", "id": ids["document_one"]}}
-                    ],
+                    "representations": [{"source": {"id": ids["document_one"]}}],
                 },
                 {
                     "archive": "default",
@@ -75,9 +73,7 @@ def flow() -> tuple[dict[str, Any], dict[str, str]]:
                     "version_id": ids["version_two"],
                     "document_type": None,
                     "metadata": {"original_filename": "input-two.bin"},
-                    "representations": [
-                        {"source": {"source": "generate", "id": ids["document_two"]}}
-                    ],
+                    "representations": [{"source": {"id": ids["document_two"]}}],
                 },
             ],
             "on": {
@@ -119,7 +115,7 @@ def flow() -> tuple[dict[str, Any], dict[str, str]]:
                                             "representations": [
                                                 {
                                                     "source": {
-                                                        "source": "generate",
+                                                        "source": "temporary",
                                                         "id": ids["bundle"],
                                                     }
                                                 }

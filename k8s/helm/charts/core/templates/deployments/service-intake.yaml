@@ -38,6 +38,9 @@
 {{- if $transform.enabled -}}
 {{- $capabilities = append $capabilities "transform" -}}
 {{- end -}}
+{{- if .Values.services.ubl.enabled -}}
+{{- $capabilities = append $capabilities "ubl" -}}
+{{- end -}}
 {{- if .Values.services.search.enabled -}}
 {{- $capabilities = append $capabilities "search-index" -}}
 {{- end -}}

@@ -52,13 +52,13 @@ def test_bundle_node_round_trip_preserves_archive_source() -> None:
         ([], "at least one"),
         (
             [
-                {"source": "generate", "id": str(uuid4()), "filename": "same"},
-                {"source": "generate", "id": str(uuid4()), "filename": "same"},
+                {"id": str(uuid4()), "filename": "same"},
+                {"id": str(uuid4()), "filename": "same"},
             ],
             "unique",
         ),
         (
-            [{"source": "generate", "id": str(uuid4()), "filename": "../bad"}],
+            [{"id": str(uuid4()), "filename": "../bad"}],
             "plain file names",
         ),
     ],
@@ -66,6 +66,18 @@ def test_bundle_node_round_trip_preserves_archive_source() -> None:
 def test_bundle_node_rejects_invalid_members(documents, message: str) -> None:
     with pytest.raises(ValueError, match=message):
         BundleNode(documents=documents, out=uuid4())
+
+
+def test_bundle_output_cannot_overwrite_temporary_input() -> None:
+    identifier = uuid4()
+    with pytest.raises(ValueError, match="overwrite"):
+        BundleNode(
+            documents=[
+                {"id": str(uuid4()), "filename": "first.pdf"},
+                {"id": str(identifier), "filename": "second.pdf"},
+            ],
+            out=identifier,
+        )
 
 
 def test_zip_builder_is_deterministic() -> None:

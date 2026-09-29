@@ -76,7 +76,7 @@ def flow(
                     "default_representation_id": default_representation,
                     "representations": [
                         {
-                            "source": {"source": "generate", "id": item["source"]},
+                            "source": {"id": item["source"]},
                             "representation_id": item["representation"],
                             "name": f"representation-{position}.txt",
                             "metadata": {"sequence": position},

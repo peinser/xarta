@@ -18,6 +18,7 @@
     'bcrypt>=5,<6',
     'brotli>=1.1.0,<2',
     'cryptography>=50,<51',
+    'dnspython>=2.8,<3',
     'isodate>=0.7,<0.8',
     'jsonschema>=4.21.1,<5',
     'jwcrypto>=1.5.6,<2',
@@ -36,6 +37,7 @@
     'pytz>=2026,<2027',
     'qrcode>=8.0,<9',
     'sanic>=25,<26',
+    'saxonche>=12.9,<13',
     'structlog>=26,<27',
     'uvloop>=0.22,<0.23',
     'websockets>=17,<18',
@@ -89,6 +91,10 @@
       'src/xarta/services/v1/doccle',
       'src/xarta/services/v1/peppol',
       'src/xarta/services/v1/postal',
+      'src/xarta/protocol/dag/signature',
+      'src/xarta/protocol/dag/ubl',
+      'src/xarta/services/v1/ubl',
+      'src/xarta/ubl',
       'apps/postal-station/src/postal_station',
     ]
     no_implicit_optional = true

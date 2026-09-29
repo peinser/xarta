@@ -24,7 +24,8 @@ Decide and document:
 - which failures are semantic outcomes, retryable transport failures, uncertain
   outcomes, or permanent execution failures.
 
-Use explicit document sources for document inputs. For example, a bundle built from an
+Use shared document references for document inputs. An omitted source selects `temporary`;
+an explicit source selects its resolver. For example, a bundle built from an
 archived version declares `source: archive`, the archive name, document ID, and exact
 version. Do not resolve "current" when a predecessor has already emitted a concrete
 version ID; doing so introduces a race with later versions.

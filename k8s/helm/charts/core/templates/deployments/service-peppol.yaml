@@ -70,6 +70,16 @@ spec:
         {{- include "temporaryStorage.env" $ | nindent 8 }}
         - name: PEPPOL_CONFIGURATIONS_CONFIG_PATH
           value: /mnt/config/peppol/peppol.json
+        - name: PEPPOL_DISCOVERY_ENVIRONMENT
+          value: {{ .Values.services.peppol.discovery.environment | quote }}
+        - name: PEPPOL_DISCOVERY_DNS_TIMEOUT
+          value: {{ .Values.services.peppol.discovery.dnsTimeout | quote }}
+        - name: PEPPOL_DISCOVERY_HTTP_TIMEOUT
+          value: {{ .Values.services.peppol.discovery.httpTimeout | quote }}
+        - name: PEPPOL_DISCOVERY_TOTAL_TIMEOUT
+          value: {{ .Values.services.peppol.discovery.totalTimeout | quote }}
+        - name: PEPPOL_DISCOVERY_CONCURRENCY
+          value: {{ .Values.services.peppol.discovery.concurrency | quote }}
         - name: ARCHIVE_SERVICE_ENDPOINT
           value: http://{{ include "service.name" (dict "release" $.Release "name" "archive") }}/api/archive
         - name: ARCHIVE_SERVICE_TIMEOUT

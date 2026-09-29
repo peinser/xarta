@@ -173,6 +173,10 @@ def configuration() -> MCPConfiguration:
         ({"request_timeout_seconds": 0}, "timeout must be positive"),
         ({"archive_max_resource_bytes": 0}, "resource limit"),
         ({"allowed_hosts": ()}, "at least one host"),
+        ({"ubl_base_url": "file:///tmp/ubl"}, "HTTP or HTTPS"),
+        ({"peppol_base_url": "http://user:secret@peppol"}, "credentials"),
+        ({"validation_timeout_seconds": float("nan")}, "validation timeout"),
+        ({"ubl_max_document_bytes": 10485761}, "UBL document limit"),
     ],
 )
 def test_mcp_configuration_rejects_unsafe_values(overrides, message: str) -> None:

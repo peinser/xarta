@@ -116,10 +116,13 @@ list_document_types    get_document_type        check_document_type
 get_capabilities       list_flow_profiles       get_flow_profile
 prepare_flow           prepare_profile          get_archived_document
 list_archived_document_versions
+list_ubl_validation_profiles   validate_ubl_schema   validate_ubl_business_rules
+check_peppol_participant_registration
 
 <span class="comment"># May execute irreversible document delivery</span>
 submit_flow            submit_profile</code></pre>
       <div class="note"><strong>Profiles are optional.</strong> An agent may select an exact server-owned profile, or submit its own complete DAG using only the capabilities currently advertised by <code>get_capabilities</code>.</div>
+      <div class="note">UBL validation and Peppol registration tools appear when their services are configured. Inspect <code>body.valid</code> and <code>body.registered</code>: HTTP 200 is not proof of validity or registration. A null registration result is indeterminate, never unregistered.</div>
     </section>
 
     <section>
@@ -142,7 +145,7 @@ Content-Type: application/json
 {
   "id": "10000000-0000-0000-0000-000000000001",
   "correlation_id": "20000000-0000-0000-0000-000000000001",
-  "inputs": { "document": { "source": "generate", "id": "..." } }
+  "inputs": { "document": { "id": "..." } }
 }
 
 <span class="comment"># Or submit a complete custom flow</span>
@@ -208,6 +211,18 @@ Read-only tools:
 - `prepare_profile`: compile, validate, and quote a profile without execution
 - `get_archived_document`: exact metadata and a bounded immutable-version resource link
 - `list_archived_document_versions`: cursor-paginated immutable version history
+- `list_ubl_validation_profiles`: available pinned rule profiles and releases (when configured)
+- `validate_ubl_schema`: validate a UTF-8 XML string against UBL XSDs without storing it
+- `validate_ubl_business_rules`: validate XML/schema and billing rules, including Belgian Peppol identifier rules
+- `check_peppol_participant_registration`: direct SML/SMP lookup by four-digit ICD scheme and identifier
+
+The UBL tools accept `xml` as a UTF-8-compatible XML string. Business-rule validation
+also accepts `profile` (default `peppol-bis-billing-3`). Discover profiles before use.
+Results preserve `{status, body}`. Inspect `body.valid`, not HTTP status alone.
+Registration preserves `body.registered` as true, false, or null; null/indeterminate
+must never be treated as false/not_registered. Preserve failure evidence and retryability.
+Registration is not Access Point liveness or document-type support. Optional tools
+are omitted when their upstream service URL is not configured.
 
 Execution tools:
 
@@ -243,6 +258,10 @@ GET  /api/v1/intake/profiles/{name}/{version}
 POST /api/v1/intake/prepare
 POST /api/v1/intake/
 POST /api/v1/intake/profiles/{name}/{version}
+GET  /api/v1/ubl/validation/profiles
+POST /api/v1/ubl/validate/schema
+POST /api/v1/ubl/validate/business-rules
+GET  /api/v1/peppol/participants/{scheme}/{identifier}/registration
 ```
 
 Paid HTTP retries use `PAYMENT-REQUIRED`, `PAYMENT-SIGNATURE`, and

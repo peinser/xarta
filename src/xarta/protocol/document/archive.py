@@ -8,10 +8,17 @@ from typing import TYPE_CHECKING
 from typing import Any
 from uuid import UUID
 
+from xarta import env
 from xarta.protocol.document.type import DocumentTypeIdentifier
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+
+ARCHIVE_SERVICE_ENDPOINT = env.extract(key="ARCHIVE_SERVICE_ENDPOINT", dtype=str)
+ARCHIVE_SERVICE_TIMEOUT = env.extract(
+    key="ARCHIVE_SERVICE_TIMEOUT", default="30.0", dtype=float
+)
 
 
 @dataclass(frozen=True)

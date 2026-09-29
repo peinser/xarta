@@ -11,6 +11,13 @@
 {{- fail "services.mcp.settings.requestTimeoutSeconds must be greater than zero" -}}
 {{- end -}}
 {{- $archiveMaxResourceBytes := int .Values.services.mcp.settings.archiveMaxResourceBytes -}}
+{{- if and .Values.services.mcp.enabled (le (float64 .Values.services.mcp.settings.validationTimeoutSeconds) 0.0) -}}
+{{- fail "services.mcp.settings.validationTimeoutSeconds must be greater than zero" -}}
+{{- end -}}
+{{- $ublMaxDocumentBytes := int .Values.services.mcp.settings.ublMaxDocumentBytes -}}
+{{- if and .Values.services.mcp.enabled (or (le $ublMaxDocumentBytes 0) (gt $ublMaxDocumentBytes 10485760)) -}}
+{{- fail "services.mcp.settings.ublMaxDocumentBytes must be between 1 and 10485760" -}}
+{{- end -}}
 {{- if and .Values.services.mcp.enabled (or (le $archiveMaxResourceBytes 0) (gt $archiveMaxResourceBytes 8388608)) -}}
 {{- fail "services.mcp.settings.archiveMaxResourceBytes must be between 1 and 8388608" -}}
 {{- end -}}

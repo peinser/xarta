@@ -14,7 +14,7 @@ from xarta.exceptions.protocol import TemporaryError
 from xarta.protocol.dag import NodeTask
 from xarta.protocol.dag.transform import TransformNode
 from xarta.protocol.document.source import DocumentSourceResult
-from xarta.protocol.document.source import GenerateDocumentSource
+from xarta.protocol.document.source import TemporaryDocumentSource
 from xarta.protocol.document.type import DocumentTypeIdentifier
 from xarta.services.v1.transform import nats as transform_nats
 from xarta.services.v1.transform.gotenberg import GotenbergTransformClient
@@ -233,7 +233,7 @@ async def test_worker_convert_preserves_semantic_metadata(monkeypatch) -> None:
     )
     node = TransformNode(
         convert={
-            "document": {"source": "generate", "id": str(input_id)},
+            "document": {"id": str(input_id)},
             "out": str(output_id),
             "content_type": "application/pdf",
         }
@@ -250,7 +250,7 @@ async def test_worker_convert_preserves_semantic_metadata(monkeypatch) -> None:
     async def persist(result):
         persisted.append(result)
 
-    monkeypatch.setattr(GenerateDocumentSource, "retrieve", retrieve)
+    monkeypatch.setattr(TemporaryDocumentSource, "retrieve", retrieve)
     monkeypatch.setattr(transform_nats, "_existing_output", missing)
     monkeypatch.setattr(transform_nats, "_persist_output", persist)
 
@@ -277,7 +277,7 @@ async def test_worker_merge_preserves_input_order(monkeypatch) -> None:
     }
     node = TransformNode(
         merge={
-            "documents": [{"source": "generate", "id": str(value)} for value in ids],
+            "documents": [{"id": str(value)} for value in ids],
             "out": str(output_id),
         }
     )
@@ -292,7 +292,7 @@ async def test_worker_merge_preserves_input_order(monkeypatch) -> None:
     async def persist(_result):
         return None
 
-    monkeypatch.setattr(GenerateDocumentSource, "retrieve", retrieve)
+    monkeypatch.setattr(TemporaryDocumentSource, "retrieve", retrieve)
     monkeypatch.setattr(transform_nats, "_existing_output", missing)
     monkeypatch.setattr(transform_nats, "_persist_output", persist)
 
@@ -312,7 +312,7 @@ async def test_partial_split_replay_only_generates_missing_output(monkeypatch) -
     second = uuid4()
     node = TransformNode(
         split={
-            "document": {"source": "generate", "id": str(input_id)},
+            "document": {"id": str(input_id)},
             "outputs": [
                 {"pages": {"start": 1, "end": 1}, "out": str(first)},
                 {"pages": {"start": 2, "end": 3}, "out": str(second)},
@@ -331,7 +331,7 @@ async def test_partial_split_replay_only_generates_missing_output(monkeypatch) -
     async def persist(result):
         persisted.append(result.id)
 
-    monkeypatch.setattr(GenerateDocumentSource, "retrieve", retrieve)
+    monkeypatch.setattr(TemporaryDocumentSource, "retrieve", retrieve)
     monkeypatch.setattr(transform_nats, "_existing_output", existing)
     monkeypatch.setattr(transform_nats, "_persist_output", persist)
 
@@ -352,8 +352,8 @@ async def test_completed_merge_replay_skips_provider(monkeypatch) -> None:
     node = TransformNode(
         merge={
             "documents": [
-                {"source": "generate", "id": str(uuid4())},
-                {"source": "generate", "id": str(uuid4())},
+                {"id": str(uuid4())},
+                {"id": str(uuid4())},
             ],
             "out": str(uuid4()),
         }

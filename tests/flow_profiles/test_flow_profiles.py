@@ -35,7 +35,7 @@ def configuration(*, dynamic_url: bool = False, pin: bool = True) -> dict:
                         "inputs": {
                             "document": {
                                 "type": "document-source",
-                                "allowed_sources": ["generate"],
+                                "allowed_sources": ["temporary"],
                             },
                             "payload": {
                                 "type": "json-object",
@@ -114,7 +114,7 @@ def test_signature_policy_is_literal_profile_mechanics() -> None:
 
 def values() -> dict:
     return {
-        "document": {"source": "generate", "id": str(uuid4())},
+        "document": {"source": "temporary", "id": str(uuid4())},
         "payload": {"payroll_run": "2026-08"},
     }
 
@@ -291,7 +291,7 @@ def test_generated_document_id_connects_producer_and_consumer() -> None:
                                         "node_key": "send-peppol",
                                         "kind": "peppol",
                                         "document": {
-                                            "source": "generate",
+                                            "source": "temporary",
                                             "id": {
                                                 "$generated": "rendered_document_id"
                                             },

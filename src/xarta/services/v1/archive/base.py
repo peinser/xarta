@@ -12,8 +12,8 @@ from sanic import Blueprint
 from xarta import cache
 from xarta import env
 from xarta.adapters import AdapterRegistry
-from xarta.protocol.dag.archive.constants import ARCHIVE_SERVICE_ENDPOINT
-from xarta.protocol.dag.archive.constants import ARCHIVE_SERVICE_TIMEOUT
+from xarta.protocol.document.archive import ARCHIVE_SERVICE_ENDPOINT
+from xarta.protocol.document.archive import ARCHIVE_SERVICE_TIMEOUT
 from xarta.tracking import DestinationRegistry
 
 from .adapters import ArchiveAdapter

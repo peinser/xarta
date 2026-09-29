@@ -1,0 +1,35 @@
+{
+  "ubl": {
+    "version": "2.1",
+    "url": "https://docs.oasis-open.org/ubl/os-UBL-2.1/UBL-2.1.zip",
+    "sha256": "60b80d76394a8a2add90723ecb8e0e2e9d826775de9749df37a72d60703f86ed"
+  },
+  "billing": {
+    "release": "2026.05",
+    "phive_rules_commit": "000e6fb9aba9cd6ca4586ef4174dc8bcd5dc9c55"
+  },
+  "files": {
+    "billing-3/2026.05/CEN-EN16931-UBL.xslt": "06a850a48703faa7e38cbcc7a8ded0f0645a941a0ee448598a02ae7197b86356",
+    "billing-3/2026.05/PEPPOL-EN16931-UBL.xslt": "482a9d98062426d901194b754ecd0665b2c9e519fe3da8b7787477f0fc4ada6e",
+    "billing-3/LICENSE": "cb5e8e7e5f4a3988e1063c142c60dc2df75605f4c46515e776e3aca6df976e14",
+    "billing-3/NOTICE": "8b80df745e06a6a47f99199558b130b4e39147037d8c1619102541285b81922c",
+    "billing-3/examples/base-creditnote-correction.xml": "08e0ad82e0dbe7e16d7533c01761843343a56954ea24881d0f7f1cce06f8879e",
+    "billing-3/examples/base-example.xml": "1b7cc3ff1834c8963f2c93f30f171b58002cbf0b2c52dc8765e7e83aebb9f7c9",
+    "xsd/common/CCTS_CCT_SchemaModule-2.1.xsd": "dd546e4809df86b6445589f69f0d6c9df162840ae386574ddfc1da7638103e15",
+    "xsd/common/UBL-CommonAggregateComponents-2.1.xsd": "939172ad8dd057cd403e7f763f6532184dd5ed4b9de24c42ebb35db4792ba613",
+    "xsd/common/UBL-CommonBasicComponents-2.1.xsd": "bd4ad043ee1d9da1c7f8018dabf739cfafdfb59143d0d16b9ef769e6b7c408a7",
+    "xsd/common/UBL-CommonExtensionComponents-2.1.xsd": "ad7a4e490978adfbcfc5ec0bb20941cf11ac960ccf0c4de8791a7c731a8dbe87",
+    "xsd/common/UBL-CommonSignatureComponents-2.1.xsd": "3db472305f029bba5c1ae157bfd0178f715c3f9b94bd8e6c557dbce5e88da874",
+    "xsd/common/UBL-CoreComponentParameters-2.1.xsd": "8be3379dbdcbcc7802fafdd16bac72c48fff1c0bb364213a31a17911dd06100b",
+    "xsd/common/UBL-ExtensionContentDataType-2.1.xsd": "fcee77a11870208e6377ea6311b9f2a050bca24bdad8606ea02d71e9f9e72f8d",
+    "xsd/common/UBL-QualifiedDataTypes-2.1.xsd": "7dcb156e610239c97ae70940cf4653b88e48c3595bf5f56a2204a32e2893e6cf",
+    "xsd/common/UBL-SignatureAggregateComponents-2.1.xsd": "17bb6b62d709b4fd81449a37655af36aa6a1276ad4fdb1b2e249a5ed4b7c2172",
+    "xsd/common/UBL-SignatureBasicComponents-2.1.xsd": "cef924d7ba3d1d8ade14469325cde1364f8c174e46f0198ec02da8e9e748a489",
+    "xsd/common/UBL-UnqualifiedDataTypes-2.1.xsd": "09052d406b4293e2a5f9c2bfee6df10ad4d8d5f0b36e24a6349d7f7936d89eb6",
+    "xsd/common/UBL-XAdESv132-2.1.xsd": "a4f726bcf8cc3f7d9ffa4dab99e005535a8e8b60dced1e5d94578d2e05afa96e",
+    "xsd/common/UBL-XAdESv141-2.1.xsd": "1fa4625e9cefcb7a9abb5ac1b64315547450031eece8a55bd584e4ba4b79dbc1",
+    "xsd/common/UBL-xmldsig-core-schema-2.1.xsd": "101909c9f06456d61ddcc4fb982f1d40dc357b439f393b1a2eb46e42acd60809",
+    "xsd/maindoc/UBL-CreditNote-2.1.xsd": "a54651b1225052f811bf2ba01346f13f2454e7cc3e0be290c91dd680dc7b7b1a",
+    "xsd/maindoc/UBL-Invoice-2.1.xsd": "40fae8cb436f3a9506d7acce65ba162caef3b0bed4d5cbc0992b2153ded4edf4"
+  }
+}

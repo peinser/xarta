@@ -62,13 +62,9 @@ class BundleNode(Node):
                 dict(compression or {})
             )
         )
-        interpreted = self.interpret()
-        if any(
-            document.source.source == "generate"
-            and UUID(str(document.source.id)) == self.output_id
-            for document in interpreted
-        ):
-            raise ValueError("Bundle output cannot overwrite an input document")
+        source.reject_input_overwrite(
+            (document.source for document in self.interpret()), {self.output_id}
+        )
 
     @property
     def documents(self) -> list[dict[str, Any]]:

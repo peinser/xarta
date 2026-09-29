@@ -16,7 +16,7 @@ from xarta.services.v1.intake.capabilities import CapabilityManifest
 
 
 def generated(identifier=None) -> dict:
-    return {"source": "generate", "id": str(identifier or uuid4())}
+    return {"id": str(identifier or uuid4())}
 
 
 @pytest.mark.parametrize(
@@ -168,13 +168,31 @@ def test_transform_split_output_ids_are_unique() -> None:
         )
 
 
-def test_transform_output_cannot_overwrite_generated_input() -> None:
+def test_transform_output_cannot_overwrite_temporary_input() -> None:
     identifier = uuid4()
-    with pytest.raises(ValueError, match="overwrite"):
-        TransformNode(
-            convert={
+    for operation in (
+        {
+            "convert": {
                 "document": generated(identifier),
                 "out": str(identifier),
                 "content_type": "application/pdf",
             }
-        )
+        },
+        {
+            "merge": {
+                "documents": [generated(), generated(identifier)],
+                "out": str(identifier),
+            }
+        },
+        {
+            "split": {
+                "document": generated(identifier),
+                "outputs": [
+                    {"pages": {"start": 1, "end": 1}, "out": str(uuid4())},
+                    {"pages": {"start": 2, "end": 2}, "out": str(identifier)},
+                ],
+            }
+        },
+    ):
+        with pytest.raises(ValueError, match="overwrite"):
+            TransformNode(**operation)

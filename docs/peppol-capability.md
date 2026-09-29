@@ -1,5 +1,8 @@
 # Peppol Capability
 
+Direct participant registration checks are available through the [Peppol discovery API](peppol-discovery.md).
+Document schema and billing-rule checks are available through the [UBL validation APIs](ubl-validation.md).
+
 ## Contract
 
 **A `PeppolNode` says only: submit this UBL document through Peppol.**

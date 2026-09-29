@@ -63,6 +63,7 @@ helm-verify: ## Lint, render, and validate all Helm charts
 	bash k8s/helm/tests/mcp.sh
 	bash k8s/helm/tests/peppol.sh
 	bash k8s/helm/tests/template-engines.sh
+	bash k8s/helm/tests/ubl.sh
 	bash k8s/helm/tests/telemetry.sh
 	@set -o pipefail; $(HELM) template xarta k8s/helm/charts/core -f k8s/helm/ci/core-values.yaml | $(KUBECONFORM) -strict -summary -ignore-missing-schemas
 	@set -o pipefail; $(HELM) template xarta-db k8s/helm/charts/db-tools -f k8s/helm/ci/db-tools-values.yaml | $(KUBECONFORM) -strict -summary -ignore-missing-schemas
@@ -83,6 +84,10 @@ mcp: ## Run the local MCP service against make dev
 	MCP_INTAKE_BASE_URL="$${MCP_INTAKE_BASE_URL:-http://127.0.0.1:8000/api/v1/intake}" \
 	MCP_DOCUMENT_TYPE_BASE_URL="$${MCP_DOCUMENT_TYPE_BASE_URL:-http://127.0.0.1:8000/api/v1/document-type}" \
 	MCP_ARCHIVE_BASE_URL="$${MCP_ARCHIVE_BASE_URL:-http://127.0.0.1:8000/api/v1/archive}" \
+	MCP_UBL_BASE_URL="$${MCP_UBL_BASE_URL:-http://127.0.0.1:8000/api/v1/ubl}" \
+	MCP_PEPPOL_BASE_URL="$${MCP_PEPPOL_BASE_URL:-http://127.0.0.1:8000/api/v1/peppol}" \
+	MCP_VALIDATION_TIMEOUT_SECONDS="$${MCP_VALIDATION_TIMEOUT_SECONDS:-35}" \
+	MCP_UBL_MAX_DOCUMENT_BYTES="$${MCP_UBL_MAX_DOCUMENT_BYTES:-10485760}" \
 	MCP_REQUEST_TIMEOUT_SECONDS="$${MCP_REQUEST_TIMEOUT_SECONDS:-30}" \
 	MCP_ARCHIVE_MAX_RESOURCE_BYTES="$${MCP_ARCHIVE_MAX_RESOURCE_BYTES:-4194304}" \
 	MCP_ALLOWED_HOSTS="$${MCP_ALLOWED_HOSTS:-127.0.0.1:$$port,localhost:$$port}" \
@@ -369,7 +374,8 @@ standalone: ## Run all services with hot reload
 	ARCHIVE_POSTGRESQL_PASSWORD="$${ARCHIVE_POSTGRESQL_PASSWORD:-dev}" \
 	ARCHIVE_POSTGRESQL_DATABASE="$${ARCHIVE_POSTGRESQL_DATABASE:-archive}" \
 	ARCHIVE_POSTGRESQL_HOST="$${ARCHIVE_POSTGRESQL_HOST:-postgres}" \
-	INTAKE_CAPABILITIES='["archive","bundle","doccle","email","generate","postal","search-index","sftp","signature","wait-for","webhook"]' \
+	PEPPOL_DISCOVERY_ENVIRONMENT="$${PEPPOL_DISCOVERY_ENVIRONMENT:-test}" \
+	INTAKE_CAPABILITIES='["archive","bundle","doccle","email","generate","postal","search-index","sftp","signature","ubl","wait-for","webhook"]' \
 	SCENARIO_DECODE_POSTGRES_JSON=true \
 	$(UV) run --frozen sanic -r -1 --workers 1 --host 0.0.0.0 --factory tests.scenarios.common:scenario_standalone_application
 
@@ -391,7 +397,8 @@ debug: ## Run all services in debug mode
 	ARCHIVE_POSTGRESQL_PASSWORD="$${ARCHIVE_POSTGRESQL_PASSWORD:-dev}" \
 	ARCHIVE_POSTGRESQL_DATABASE="$${ARCHIVE_POSTGRESQL_DATABASE:-archive}" \
 	ARCHIVE_POSTGRESQL_HOST="$${ARCHIVE_POSTGRESQL_HOST:-postgres}" \
-	INTAKE_CAPABILITIES='["archive","bundle","doccle","email","generate","postal","search-index","sftp","signature","wait-for","webhook"]' \
+	PEPPOL_DISCOVERY_ENVIRONMENT="$${PEPPOL_DISCOVERY_ENVIRONMENT:-test}" \
+	INTAKE_CAPABILITIES='["archive","bundle","doccle","email","generate","postal","search-index","sftp","signature","ubl","wait-for","webhook"]' \
 	SCENARIO_DECODE_POSTGRES_JSON=true \
 	$(UV) run --frozen sanic -r -1 --debug --host 0.0.0.0 --factory tests.scenarios.common:scenario_standalone_application
 

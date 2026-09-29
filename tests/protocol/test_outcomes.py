@@ -142,6 +142,7 @@ def test_supported_node_kinds_matches_protocol_parsers() -> None:
             "search-index",
             "signature",
             "transform",
+            "ubl",
             "wait-for",
             "webhook",
         }

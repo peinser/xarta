@@ -10,9 +10,13 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 
+from multidict import CIMultiDict
 from opentelemetry.instrumentation.aiohttp_client import create_trace_config
 
+from xarta.__version__ import __version__
 from xarta.telemetry import is_enabled
+
+USER_AGENT = f"Xarta/{__version__} (+https://github.com/peinser/xarta)"
 
 if TYPE_CHECKING:
     from asyncio import AbstractEventLoop
@@ -33,20 +37,30 @@ class HTTPRequestManager:
 
     @classmethod
     async def open(cls, loop: AbstractEventLoop, **kwargs) -> aiohttp.ClientSession:
-        connector = aiohttp.TCPConnector(limit=512)
+        connector = kwargs.pop("connector", None)
+        if connector is None:
+            connector = aiohttp.TCPConnector(limit=512)
         timeout = kwargs.pop("timeout", aiohttp.ClientTimeout(total=30, connect=5))
+        headers = CIMultiDict(kwargs.pop("headers", {}))
+        headers.setdefault("User-Agent", USER_AGENT)
         if is_enabled():
             kwargs.setdefault(
                 "trace_configs", [create_trace_config(url_filter=_trace_url)]
             )
-        return aiohttp.ClientSession(connector=connector, timeout=timeout, **kwargs)
+        return aiohttp.ClientSession(
+            connector=connector, timeout=timeout, headers=headers, **kwargs
+        )
 
     @classmethod
     async def _cleanup(cls, app: Sanic) -> None:
         async with cls.__lock__:
             if hasattr(app.ctx, "http_client_session"):
+                session = app.ctx.http_client_session
                 del app.ctx.http_client_session
-                await cls.__session__.close()
+                if session is not None:
+                    await session.close()
+                if cls.__session__ is session:
+                    cls.__session__ = None
 
     @classmethod
     async def register(cls, app: Sanic, **kwargs) -> None:

@@ -26,7 +26,10 @@ if TYPE_CHECKING:
 
 class TemporaryStorage(Protocol):
     async def put(self, key: str, data: bytes, content_type: str) -> bool:
-        """Store immutable bytes and return whether this call created them."""
+        """Store immutable bytes and return whether this call created them.
+
+        Raise FileExistsError when the key already holds different bytes.
+        """
         ...
 
     async def get(self, key: str) -> bytes: ...
@@ -163,10 +166,12 @@ class S3TemporaryStorage:
         except ClientError as ex:
             status = ex.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
             code = ex.response.get("Error", {}).get("Code")
-            if (
-                status != 412 and code not in {"PreconditionFailed", "412"}
-            ) or await self.get(key) != data:
+            if status != 412 and code not in {"PreconditionFailed", "412"}:
                 raise
+            if await self.get(key) != data:
+                raise FileExistsError(
+                    f"Immutable temporary storage key already exists: {key}"
+                ) from ex
             return False
 
     async def get(self, key: str) -> bytes:

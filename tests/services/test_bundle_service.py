@@ -52,7 +52,7 @@ async def test_bundle_worker_persists_zip_and_emits_success(monkeypatch) -> None
         ),
     ]
     node = BundleNode(
-        documents=[{"source": "generate", "id": str(uuid4()), "filename": "one.txt"}],
+        documents=[{"id": str(uuid4()), "filename": "one.txt"}],
         out=output_id,
     )
     monkeypatch.setattr(node, "interpret", lambda: documents)

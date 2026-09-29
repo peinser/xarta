@@ -124,7 +124,7 @@ def postal_flow() -> tuple[dict[str, Any], dict[str, str]]:
             "representations": [
                 {
                     "source": {
-                        "source": "generate",
+                        "source": "temporary",
                         "id": ids[f"generated_{ordinal}"],
                     }
                 }

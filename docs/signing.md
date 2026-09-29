@@ -1,5 +1,30 @@
 # PDF signing
 
+## Document inputs and outputs
+
+Signing consumes the same document-reference objects as the other document operations:
+
+```json
+{
+  "kind": "signature",
+  "policy": "pades-b-b-v1",
+  "documents": [
+    {
+      "document": {"id": "11111111-1111-1111-1111-111111111111"},
+      "out": "22222222-2222-2222-2222-222222222222"
+    }
+  ]
+}
+```
+
+Omitting `source` selects `temporary`. To sign an archived PDF, use a document object with `source: "archive"`, `id`, and preferably an exact `version` and `representation`. Other shared sources are accepted, but the resolved bytes must be a PDF supported by the signing policy. Configure `ARCHIVE_SERVICE_ENDPOINT`, `RENDER_SERVICE_ENDPOINT`, or `BUNDLE_SERVICE_ENDPOINT` and their timeouts when using those sources; the Helm worker supplies these settings.
+
+Every `out` writes a new `application/pdf` artifact to temporary storage, preserving the source document type and metadata. Reference the signed result using `{"id": "<out UUID>"}`. The original remains unchanged. Output IDs must be unique within the batch and cannot collide with any temporary input ID. Batch signing can partially complete: retries reuse the already signed outputs after verifying their source and signing policy, then complete missing outputs.
+
+Signing re-resolves inputs on retry. Use exact archive versions/representations or materialize mutable/rendered inputs into temporary storage first for reproducible retries. A changed input must not reuse the old signed output ID. The UBL editor's input snapshot mechanism is specific to UBL editing, not a new guarantee for all producers.
+
+The previous `in` field is rejected. See [temporary-storage migration](temporary-storage.md#migration-from-generated-document-sources). Signing currently handles PDF signatures, not UBL/XML signatures. To attach a signed PDF to UBL, sign the PDF first, then reference its output from an `add_attachment` operation.
+
 ## Policy selection
 
 Callers may set a stable signing policy on a signature node:

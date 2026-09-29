@@ -220,6 +220,8 @@ async def test_s3_operations_missing_normalization_and_paginated_cleanup(
     monkeypatch.setattr(S3TemporaryStorage, "_client", client)
     assert await storage.put("aa/one", b"1", "text/plain") is True
     assert await storage.put("aa/one", b"1", "text/plain") is False
+    with pytest.raises(FileExistsError):
+        await storage.put("aa/one", b"2", "text/plain")
     assert await storage.get("aa/one") == b"1"
     await storage.delete("aa/one")
     with pytest.raises(FileNotFoundError):

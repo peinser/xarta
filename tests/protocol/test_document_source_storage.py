@@ -11,7 +11,7 @@ import xarta.protocol.dag
 import xarta.protocol.document.source as source_module
 
 from xarta.protocol.document.source import DocumentSourceResult
-from xarta.protocol.document.source import GenerateDocumentSource
+from xarta.protocol.document.source import TemporaryDocumentSource
 from xarta.protocol.document.type import DocumentTypeIdentifier
 from xarta.storage import FilesystemTemporaryStorage
 
@@ -34,7 +34,7 @@ async def test_generated_document_source_round_trip(
     )
 
     await original.persist()
-    restored = await GenerateDocumentSource(identifier).retrieve()
+    restored = await TemporaryDocumentSource(identifier).retrieve()
 
     assert restored == original
     base = tmp_path / "12" / "34" / "56" / "78"
@@ -42,18 +42,16 @@ async def test_generated_document_source_round_trip(
     assert (base / f"{identifier}.json").is_file()
 
 
-async def test_generated_document_persists_metadata_and_binary_concurrently(
+async def test_temporary_document_publishes_metadata_only_after_binary(
     monkeypatch, tmp_path: Path
 ) -> None:
-    calls: set[str] = set()
-    both_started = asyncio.Event()
+    calls: list[str] = []
 
     class RecordingStorage(FilesystemTemporaryStorage):
         async def put(self, key: str, data: bytes, content_type: str) -> bool:
-            calls.add(key)
-            if len(calls) == 2:
-                both_started.set()
-            await both_started.wait()
+            calls.append(key)
+            if key.endswith(".json"):
+                assert await self.get(key.removesuffix(".json")) == b"document"
             return await super().put(key, data, content_type)
 
     identifier = UUID("12345678-1234-5678-1234-567812345678")
@@ -68,10 +66,10 @@ async def test_generated_document_persists_metadata_and_binary_concurrently(
             document_type=DocumentTypeIdentifier("invoice"),
         ).persist()
 
-    assert calls == {
-        f"12/34/56/78/{identifier}.json",
+    assert calls == [
         f"12/34/56/78/{identifier}",
-    }
+        f"12/34/56/78/{identifier}.json",
+    ]
 
 
 async def test_generated_document_retry_completes_after_binary_failure(
@@ -102,4 +100,4 @@ async def test_generated_document_retry_completes_after_binary_failure(
         await result.persist()
     await result.persist()
 
-    assert await GenerateDocumentSource(identifier).retrieve() == result
+    assert await TemporaryDocumentSource(identifier).retrieve() == result

@@ -133,13 +133,13 @@ class PostalDocumentReference:
     @classmethod
     def fromdict(cls, value: Any) -> PostalDocumentReference:
         data = dict(_object(value, "Postal document"))
-        source_name = data.get("source")
+        source_name = data.get("source", "temporary")
         if not isinstance(source_name, str):
             raise ValueError(
-                "Postal document source must be generate, render, or archive"
+                "Postal document source must be temporary, render, or archive"
             )
         allowed_by_source = {
-            "generate": {"source", "id", "role"},
+            "temporary": {"source", "id", "role"},
             "archive": {"source", "id", "archive", "version", "role"},
             "render": {
                 "source",
@@ -157,7 +157,7 @@ class PostalDocumentReference:
         allowed = allowed_by_source.get(source_name)
         if allowed is None:
             raise ValueError(
-                "Postal document source must be generate, render, or archive"
+                "Postal document source must be temporary, render, or archive"
             )
         _require_fields(data, allowed, "Postal document")
         identifier = _required_text(data.get("id"), "Postal document id", 128)

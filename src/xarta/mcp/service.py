@@ -35,6 +35,17 @@ class ReadServiceClient:
     async def post(self, path: str, payload: dict[str, Any]) -> ServiceResponse:
         return await self._request("POST", path, payload=payload)
 
+    async def post_xml(
+        self, path: str, document: bytes, *, params: dict[str, str | int] | None = None
+    ) -> ServiceResponse:
+        return await self._request(
+            "POST",
+            path,
+            params=params,
+            data=document,
+            headers={"Content-Type": "application/xml; charset=utf-8"},
+        )
+
     async def get_content(self, path: str) -> tuple[int, bytes, str | None]:
         try:
             async with self.session.get(
@@ -55,6 +66,8 @@ class ReadServiceClient:
         *,
         params: dict[str, str | int] | None = None,
         payload: dict[str, Any] | None = None,
+        data: bytes | None = None,
+        headers: dict[str, str] | None = None,
     ) -> ServiceResponse:
         try:
             async with self.session.request(
@@ -62,6 +75,9 @@ class ReadServiceClient:
                 f"{self.base_url}{path}",
                 params=params,
                 json=payload,
+                data=data,
+                headers=headers,
+                allow_redirects=False,
                 timeout=self.timeout,
             ) as upstream:
                 raw = await upstream.read()

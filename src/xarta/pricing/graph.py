@@ -83,6 +83,7 @@ def maximum_outcome_emissions(node: Node, outcome: str) -> int:
         "sftp",
         "signature",
         "transform",
+        "ubl",
         "wait-for",
         "webhook",
     }

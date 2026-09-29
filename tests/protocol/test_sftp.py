@@ -27,13 +27,13 @@ def test_sftp_fixture_round_trip() -> None:
 )
 def test_sftp_rejects_unsafe_paths(path: str) -> None:
     with pytest.raises(ValueError, match="SFTP path"):
-        SFTPNode(document={"source": "generate", "id": "unused"}, path=path)
+        SFTPNode(document={"source": "temporary", "id": "unused"}, path=path)
 
 
 def test_sftp_interpretation_is_repeatable() -> None:
     node = SFTPNode(
         document={
-            "source": "generate",
+            "source": "temporary",
             "id": "93000000-0000-0000-0000-000000000001",
         },
         path="invoices/invoice.pdf",

@@ -30,10 +30,10 @@ from xarta.protocol.document.source import DocumentSourceResult
 from xarta.storage.configuration import close_temporary_storage
 
 PROFILE_NAME = "development-standard"
-PROFILE_VERSION = 1
+PROFILE_VERSION = 2
 PROFILE_REFERENCE = f"{PROFILE_NAME}@{PROFILE_VERSION}"
 PROFILE_FINGERPRINT = (
-    "sha256:3db653ad661e010cd6c13b73820e3c0ea34b1d6ec311756c961ffc69ceb003f3"
+    "sha256:cb7d32022b7b8cac7bfee98c939dc52aac1ebe34c06088642d46fdc70f315c61"
 )
 EXPECTED_CONTRACT = {
     "delivery_profile": PROFILE_REFERENCE,
@@ -46,7 +46,7 @@ EXPECTED_CONTRACT = {
         "document": {
             "type": "document-source",
             "required": True,
-            "allowed_sources": ["generate"],
+            "allowed_sources": ["temporary"],
         }
     },
     "generated_values": {},
@@ -291,7 +291,7 @@ async def execute(
             submission = {
                 "id": ids["flow"],
                 "correlation_id": ids["flow"],
-                "inputs": {"document": {"source": "generate", "id": ids["document"]}},
+                "inputs": {"document": {"id": ids["document"]}},
             }
 
             started = time.perf_counter_ns()

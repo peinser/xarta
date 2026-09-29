@@ -83,7 +83,7 @@ The Archive DAG uses the same shape, except each representation contains a gener
     "metadata": {},
     "representations": [{
       "source": {
-        "source": "generate",
+        "source": "temporary",
         "id": "00000000-0000-0000-0000-000000000010"
       }
     }]

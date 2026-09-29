@@ -302,6 +302,8 @@ services:
     settings:
       requestTimeoutSeconds: 30
       archiveMaxResourceBytes: 4194304
+      validationTimeoutSeconds: 35
+      ublMaxDocumentBytes: 10485760
     ingress:
       enabled: false
   ## Preview service.
@@ -394,6 +396,18 @@ services:
         b64CertificateChain: null
     ingress:
       enabled: false
+  ## UBL 2.1 editing and validation with the bundled schemas and rules.
+  ubl:
+    enabled: false
+    replicas: 1
+    settings:
+      maxBytes: 10485760
+      validationTimeout: 30
+      validationConcurrency: 2
+      nats:
+        workers: 10
+    ingress:
+      enabled: false
   ## Webhook service for sending out HTTP calls.
   ##
   webhook:
@@ -454,6 +468,12 @@ services:
   peppol:
     enabled: false
     replicas: 1
+    discovery:
+      environment: production
+      dnsTimeout: 5
+      httpTimeout: 10
+      totalTimeout: 20
+      concurrency: 10
     # Existing Secrets must provide peppol.json with retained destination revisions.
     existingSecret: null
     # Change this value whenever an externally managed fixed-name Secret rotates.

@@ -122,7 +122,9 @@ def flow(policy: SignatureScenarioPolicy) -> tuple[dict[str, Any], dict[str, str
                         "id": ids["signature_node"],
                         "kind": "signature",
                         "policy": policy.id,
-                        "documents": [{"in": ids["generated"], "out": ids["signed"]}],
+                        "documents": [
+                            {"document": {"id": ids["generated"]}, "out": ids["signed"]}
+                        ],
                         "on": {
                             "success": [
                                 {
@@ -139,7 +141,7 @@ def flow(policy: SignatureScenarioPolicy) -> tuple[dict[str, Any], dict[str, str
                                             "representations": [
                                                 {
                                                     "source": {
-                                                        "source": "generate",
+                                                        "source": "temporary",
                                                         "id": ids["signed"],
                                                     }
                                                 }

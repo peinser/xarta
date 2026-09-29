@@ -11,6 +11,8 @@ from uuid import uuid4
 
 import pytest
 
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
+
 from xarta.services.v1.archive.db import ArchiveConflictError
 from xarta.services.v1.archive.db import ArchivePostgresModel
 from xarta.services.v1.archive.db import RepresentationWrite
@@ -430,6 +432,43 @@ async def test_s3_backend_uses_conditional_put_for_representation_key() -> None:
     )
     assert calls[0]["IfNoneMatch"] == "*"
     assert calls[0]["Key"] == "xarta/payroll/document/version/representation"
+
+
+@pytest.mark.asyncio
+async def test_s3_backend_reports_different_bytes_under_existing_key() -> None:
+    backend = S3StorageBackend({"bucket": "archive"})
+
+    class Body:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def read(self):
+            return b"stored"
+
+    class Client:
+        async def put_object(self, **kwargs):
+            raise ClientError(
+                {
+                    "Error": {"Code": "PreconditionFailed"},
+                    "ResponseMetadata": {"HTTPStatusCode": 412},
+                },
+                "PutObject",
+            )
+
+        async def get_object(self, **kwargs):
+            return {"Body": Body()}
+
+    class Manager:
+        async def get(self):
+            return Client()
+
+    backend._client_manager = Manager()  # type: ignore[assignment]
+    assert await backend.put("key", b"stored", "application/pdf") is False
+    with pytest.raises(FileExistsError):
+        await backend.put("key", b"different", "application/pdf")
 
 
 def test_archive_s3_backends_share_sessions_for_the_same_connection() -> None:

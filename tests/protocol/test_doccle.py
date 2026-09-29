@@ -55,7 +55,7 @@ def test_receiver_subject_is_opaque() -> None:
 def test_doccle_requires_valid_timezone_aware_published_at(value: str) -> None:
     with pytest.raises(ValueError, match="published_at"):
         DoccleNode(
-            document={"source": "generate", "id": "document-1"},
+            document={"source": "temporary", "id": "document-1"},
             receiver={"subject": {"customer": "customer-1"}},
             document_type="invoice",
             published_at=value,
@@ -64,7 +64,7 @@ def test_doccle_requires_valid_timezone_aware_published_at(value: str) -> None:
 
 def test_doccle_exports_outcomes_and_optional_fields() -> None:
     node = DoccleNode(
-        document={"source": "generate", "id": "document-1"},
+        document={"source": "temporary", "id": "document-1"},
         receiver=DoccleReceiverSelector(id="receiver-1"),
         document_type="invoice",
         name={"en": "Invoice"},

@@ -333,7 +333,9 @@ def pdf_source() -> bytes:
 
 
 def test_signature_request_is_declarative() -> None:
-    request = SignatureNode(documents=[{"in": uuid4(), "out": uuid4()}]).interpret()[0]
+    request = SignatureNode(
+        documents=[{"document": {"id": uuid4()}, "out": uuid4()}]
+    ).interpret()[0]
 
     assert isinstance(request, SignatureRequest)
     assert not hasattr(request, "sign")
@@ -342,7 +344,7 @@ def test_signature_request_is_declarative() -> None:
 
 def test_signature_policy_round_trip_and_interpretation() -> None:
     node = SignatureNode(
-        documents=[{"in": uuid4(), "out": uuid4()}],
+        documents=[{"document": {"id": uuid4()}, "out": uuid4()}],
         policy="pades-b-lt-v1",
     )
 
@@ -409,7 +411,8 @@ async def test_worker_classifies_unknown_policy_as_permanent() -> None:
     with pytest.raises(PermanentError) as captured:
         await _worker(
             SignatureNode(
-                documents=[{"in": uuid4(), "out": uuid4()}], policy="missing"
+                documents=[{"document": {"id": uuid4()}, "out": uuid4()}],
+                policy="missing",
             ),
             components=components(SimpleNamespace()),
         )
@@ -499,7 +502,7 @@ async def test_worker_leaves_timestamp_transport_failure_retryable(monkeypatch) 
         persisted.append(result)
 
     monkeypatch.setattr(
-        "xarta.protocol.document.source.GenerateDocumentSource.retrieve",
+        "xarta.protocol.document.source.TemporaryDocumentSource.retrieve",
         output_missing,
     )
     monkeypatch.setattr(DocumentSourceResult, "persist", persist)
@@ -566,11 +569,11 @@ async def test_worker_reuses_completed_output(monkeypatch) -> None:
             return True
 
     monkeypatch.setattr(
-        "xarta.protocol.document.source.GenerateDocumentSource.retrieve", retrieve
+        "xarta.protocol.document.source.TemporaryDocumentSource.retrieve", retrieve
     )
 
     result = await _worker(
-        SignatureNode(documents=[{"in": input_id, "out": output_id}]),
+        SignatureNode(documents=[{"document": {"id": input_id}, "out": output_id}]),
         components=components(Adapter()),
     )
 
@@ -600,12 +603,12 @@ async def test_worker_rejects_mismatched_completed_output(monkeypatch) -> None:
             return False
 
     monkeypatch.setattr(
-        "xarta.protocol.document.source.GenerateDocumentSource.retrieve", retrieve
+        "xarta.protocol.document.source.TemporaryDocumentSource.retrieve", retrieve
     )
 
     with pytest.raises(PermanentError, match="does not match its source") as captured:
         await _worker(
-            SignatureNode(documents=[{"in": input_id, "out": output_id}]),
+            SignatureNode(documents=[{"document": {"id": input_id}, "out": output_id}]),
             components=components(Adapter()),
         )
     assert isinstance(captured.value.__cause__, ExistingSignatureMismatch)
@@ -640,7 +643,7 @@ async def test_worker_signs_multiple_documents_sequentially(monkeypatch) -> None
         return None
 
     monkeypatch.setattr(
-        "xarta.protocol.document.source.GenerateDocumentSource.retrieve", retrieve
+        "xarta.protocol.document.source.TemporaryDocumentSource.retrieve", retrieve
     )
     monkeypatch.setattr(DocumentSourceResult, "persist", persist)
     input_ids = [uuid4(), uuid4()]
@@ -648,7 +651,7 @@ async def test_worker_signs_multiple_documents_sequentially(monkeypatch) -> None
     await _worker(
         SignatureNode(
             documents=[
-                {"in": input_id, "out": output_id}
+                {"document": {"id": input_id}, "out": output_id}
                 for input_id, output_id in zip(input_ids, output_ids, strict=True)
             ]
         ),
