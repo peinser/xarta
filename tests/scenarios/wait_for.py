@@ -70,7 +70,7 @@ def flow(
                     "representations": [
                         {
                             "source": {
-                                "source": "generate",
+                                "source": "temporary",
                                 "id": ids[f"{prefix}_input"],
                             }
                         }

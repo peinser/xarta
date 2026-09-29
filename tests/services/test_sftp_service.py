@@ -352,7 +352,7 @@ async def test_sftp_worker_returns_uploaded_outcome(monkeypatch) -> None:
     document_id = UUID("93000000-0000-0000-0000-000000000001")
     successor = Node(kind="debug", id=UUID(expected["expected_scheduled_node_ids"][0]))
     node = SFTPNode(
-        document={"source": "generate", "id": str(document_id)},
+        document={"id": str(document_id)},
         path="invoices/invoice.pdf",
         destination="partner-sftp",
         on={"uploaded": [successor]},
@@ -378,7 +378,7 @@ async def test_sftp_worker_returns_uploaded_outcome(monkeypatch) -> None:
 async def test_sftp_worker_routes_path_conflict(monkeypatch) -> None:
     document_id = uuid4()
     node = SFTPNode(
-        document={"source": "generate", "id": str(document_id)},
+        document={"id": str(document_id)},
         path="invoice.pdf",
         destination="partner-sftp",
     )
@@ -399,7 +399,7 @@ async def test_sftp_worker_returns_uncertain_after_commit_boundary(
 ) -> None:
     document_id = uuid4()
     node = SFTPNode(
-        document={"source": "generate", "id": str(document_id)},
+        document={"id": str(document_id)},
         path="invoice.pdf",
         destination="partner-sftp",
     )

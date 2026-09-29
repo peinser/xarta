@@ -24,6 +24,8 @@ assert_contains "$deployment" "value: http://$RELEASE-service-intake/api/v1/inta
 assert_contains "$deployment" "value: http://$RELEASE-service-documenttype/api/v1/document-type"
 assert_contains "$deployment" "value: http://$RELEASE-service-archive/api/v1/archive"
 assert_contains "$deployment" 'name: MCP_ARCHIVE_MAX_RESOURCE_BYTES'
+assert_contains "$deployment" 'name: MCP_VALIDATION_TIMEOUT_SECONDS'
+assert_contains "$deployment" 'name: MCP_UBL_MAX_DOCUMENT_BYTES'
 assert_contains "$deployment" 'xarta.example.test,xarta.example.test:*"'
 
 ingress=$(helm template "$RELEASE" "$CHART" -f "$VALUES" \
@@ -53,5 +55,19 @@ fi
 
 helm template "$RELEASE" "$CHART" -f "$VALUES" \
   --set services.mcp.settings.requestTimeoutSeconds=0.5 >/dev/null
+
+enabled=$(helm template "$RELEASE" "$CHART" -f "$VALUES" \
+  --show-only templates/deployments/service-mcp.yaml \
+  --set services.ubl.enabled=true --set services.peppol.enabled=true \
+  --set services.peppol.existingSecret=peppol-test)
+assert_contains "$enabled" "value: http://$RELEASE-service-ubl/api/v1/ubl"
+assert_contains "$enabled" "value: http://$RELEASE-service-peppol/api/v1/peppol"
+disabled=$(helm template "$RELEASE" "$CHART" -f "$VALUES" \
+  --show-only templates/deployments/service-mcp.yaml \
+  --set services.ubl.enabled=false --set services.peppol.enabled=false)
+if grep -Eq 'name: MCP_(UBL|PEPPOL)_BASE_URL' <<<"$disabled"; then
+  printf 'MCP advertised an unavailable optional service\n' >&2
+  exit 1
+fi
 
 printf 'MCP Helm topology tests passed\n'

@@ -68,9 +68,7 @@ def archive_node(
                 "version_id": version_id,
                 "document_type": DOCUMENT_TYPE,
                 "metadata": {},
-                "representations": [
-                    {"source": {"source": "generate", "id": source_id}}
-                ],
+                "representations": [{"source": {"id": source_id}}],
             }
         ],
     }

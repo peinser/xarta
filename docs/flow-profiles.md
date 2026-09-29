@@ -21,7 +21,7 @@ Content-Type: application/json
   "correlation_id": "20000000-0000-0000-0000-000000000001",
   "inputs": {
     "document": {
-      "source": "generate",
+      "source": "temporary",
       "id": "90000000-0000-0000-0000-000000000001"
     },
     "employee": {"employee_id": "EMP-12345"}
@@ -37,7 +37,7 @@ The generic intake endpoint supports the equivalent envelope:
   "delivery_profile": "payroll-standard@7",
   "delivery_values": {
     "document": {
-      "source": "generate",
+      "source": "temporary",
       "id": "90000000-0000-0000-0000-000000000001"
     },
     "employee": {"employee_id": "EMP-12345"}
@@ -73,7 +73,7 @@ provider configuration.
           "inputs": {
             "document": {
               "type": "document-source",
-              "allowed_sources": ["generate"]
+              "allowed_sources": ["temporary"]
             },
             "employee": {
               "type": "json-object",
@@ -148,6 +148,13 @@ Supported types are `string`, `string-list`, `uuid`, timezone-aware `instant`, b
 include `maximum_length`, `maximum_items`, `maximum_bytes`, `allowed_sources`, and
 `require_version`.
 
+For a `document-source` input, omitting `source` selects `temporary` and is checked
+against `allowed_sources` as such. Declare `allowed_sources: ["temporary"]` for
+uploaded or previously produced artifacts; no producer-specific source name is
+needed. Archive inputs remain explicit. `ubl` profile nodes support `document`,
+`operations`, and `out`; use a declared `$generated` UUID for `out` and reference
+that same UUID in downstream nodes. See [UBL editing](ubl.md).
+
 ## Generated Values And Document IDs
 
 Callers do not supply internal document IDs used to connect profile nodes. Profiles
@@ -173,7 +180,7 @@ A downstream node can use the same value:
 
 ```json
 {
-  "source": "generate",
+  "source": "temporary",
   "id": {"$generated": "rendered_document_id"}
 }
 ```

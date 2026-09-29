@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -13,14 +15,22 @@ class MCPConfiguration:
     archive_max_resource_bytes: int
     allowed_hosts: tuple[str, ...]
     allowed_origins: tuple[str, ...] = ()
+    ubl_base_url: str | None = None
+    peppol_base_url: str | None = None
+    validation_timeout_seconds: float = 35
+    ubl_max_document_bytes: int = 10 * 1024 * 1024
 
     def __post_init__(self) -> None:
         for field, label in (
             ("intake_base_url", "intake"),
             ("document_type_base_url", "document type"),
             ("archive_base_url", "archive"),
+            ("ubl_base_url", "UBL"),
+            ("peppol_base_url", "Peppol"),
         ):
             value = getattr(self, field)
+            if value is None and field in {"ubl_base_url", "peppol_base_url"}:
+                continue
             parsed = urlsplit(value)
             if parsed.scheme not in {"http", "https"} or not parsed.hostname:
                 raise ValueError(f"MCP {label} base URL must use HTTP or HTTPS")
@@ -33,9 +43,23 @@ class MCPConfiguration:
             object.__setattr__(self, field, value.rstrip("/"))
         if (
             isinstance(self.request_timeout_seconds, bool)
+            or not math.isfinite(self.request_timeout_seconds)
             or self.request_timeout_seconds <= 0
         ):
             raise ValueError("MCP request timeout must be positive")
+        if (
+            isinstance(self.validation_timeout_seconds, bool)
+            or not math.isfinite(self.validation_timeout_seconds)
+            or self.validation_timeout_seconds <= 0
+        ):
+            raise ValueError("MCP validation timeout must be positive and finite")
+        if (
+            isinstance(self.ubl_max_document_bytes, bool)
+            or not 1 <= self.ubl_max_document_bytes <= 10 * 1024 * 1024
+        ):
+            raise ValueError(
+                "MCP UBL document limit must be between 1 and 10485760 bytes"
+            )
         if (
             isinstance(self.archive_max_resource_bytes, bool)
             or not 1 <= self.archive_max_resource_bytes <= 8 * 1024 * 1024

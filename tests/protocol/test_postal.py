@@ -18,8 +18,8 @@ from xarta.protocol.dag.postal import PrintColorMode
 from xarta.protocol.dag.postal import PrintSides
 from xarta.protocol.dag.postal import RegisteredLetterServiceV1
 from xarta.protocol.document.source import ArchiveDocumentSource
-from xarta.protocol.document.source import GenerateDocumentSource
 from xarta.protocol.document.source import RenderDocumentSource
+from xarta.protocol.document.source import TemporaryDocumentSource
 
 DOCUMENT_ID = "61ea2613-87c6-4546-b861-af7eb3897051"
 ARCHIVE_ID = "0ce71682-841d-4f84-91ba-3bed69bda212"
@@ -43,7 +43,7 @@ def specification(*, registered: bool = False, printing: bool = True) -> dict:
                     "version": ARCHIVE_VERSION,
                     "role": "cover-letter",
                 },
-                {"source": "generate", "id": DOCUMENT_ID, "role": "terms"},
+                {"source": "temporary", "id": DOCUMENT_ID, "role": "terms"},
             ]
         },
         "recipient": {
@@ -99,7 +99,7 @@ def test_letter_v1_round_trip_and_pure_interpretation(registered: bool) -> None:
         first.mailpiece.content.documents[0].source, ArchiveDocumentSource
     )
     assert isinstance(
-        first.mailpiece.content.documents[1].source, GenerateDocumentSource
+        first.mailpiece.content.documents[1].source, TemporaryDocumentSource
     )
     assert parse(node.dict()).dict() == node.dict()
 
@@ -331,7 +331,7 @@ def test_interpreted_models_are_immutable_and_detached() -> None:
 
 def test_document_count_is_bounded() -> None:
     raw = specification()
-    document = {"source": "generate", "id": DOCUMENT_ID}
+    document = {"source": "temporary", "id": DOCUMENT_ID}
     raw["mailpiece"]["content"]["documents"] = [document] * 26
 
     with pytest.raises(ValueError, match="too many documents"):

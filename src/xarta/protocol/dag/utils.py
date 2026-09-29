@@ -26,6 +26,7 @@ from xarta.protocol.dag.search import SearchIndexNode
 from xarta.protocol.dag.sftp import SFTPNode
 from xarta.protocol.dag.signature import SignatureNode
 from xarta.protocol.dag.transform import TransformNode
+from xarta.protocol.dag.ubl import UBLNode
 from xarta.protocol.dag.waitfor import WaitForNode
 from xarta.protocol.dag.webhook import WebhookNode
 
@@ -47,6 +48,7 @@ _NODE_TYPES: Final[dict[str, type[Node]]] = {
     SFTPNode.KIND: SFTPNode,
     SignatureNode.KIND: SignatureNode,
     TransformNode.KIND: TransformNode,
+    UBLNode.KIND: UBLNode,
     WaitForNode.KIND: WaitForNode,
     WebhookNode.KIND: WebhookNode,
 }
@@ -64,6 +66,7 @@ _NODE_PARSERS: Final[dict[str, Callable[..., Node]]] = {
     SFTPNode.KIND: SFTPNode.fromdict,
     SignatureNode.KIND: SignatureNode.fromdict,
     TransformNode.KIND: TransformNode.fromdict,
+    UBLNode.KIND: UBLNode.fromdict,
     WaitForNode.KIND: WaitForNode.fromdict,
     WebhookNode.KIND: WebhookNode.fromdict,
 }

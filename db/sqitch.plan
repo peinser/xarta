@@ -7,6 +7,7 @@
 00002.default-document-metadata 2024-10-28T07:20:15Z Xarta Labs <xarta@peinser.com> # Add default document metadata through the document type configuration
 00003.default-content-type 2024-11-09T21:48:41Z Xarta Labs <xarta@peinser.com> # Adds the columns 'default_content_type' to the documents type table
 00004.document-type-can-be-null 2024-11-14T13:46:43Z Xarta Labs <xarta@peinser.com> # Change which allows for the document type to be null\n\nThis is included to allow for the storage of dump binary blobs (images/zip's...)
+00005.sequences 2024-12-06T12:05:53Z Xarta Labs <xarta@peinser.com> # Adds the database design for managing sequences within Xarta
 00006.document-checksum 2024-12-15T22:19:31Z Xarta Labs <xarta@peinser.com> # Adds the SHA512 checksum to archived documents
 00007.tracked-capabilities 2026-08-26T00:00:00Z Xarta Labs <xarta@peinser.com> # Durable node executions, tracked operations, outcomes, inbox, and outbox
 00008.archive-versioning [00007.tracked-capabilities] 2026-08-28T00:00:00Z Xarta Labs <xarta@peinser.com> # Archive-scoped logical documents, immutable versions, storage pinning, and exact replay

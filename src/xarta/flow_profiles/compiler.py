@@ -57,6 +57,7 @@ _NODE_FIELDS = {
     "sftp": {"document", "path", "destination"},
     "signature": {"documents", "policy"},
     "transform": {"convert", "merge", "split"},
+    "ubl": {"document", "operations", "out"},
     "wait-for": {"backoffs", "documents"},
     "webhook": {"url", "method", "data", "auth", "headers", "multipart"},
 }
@@ -249,7 +250,7 @@ def profile_validation_values(profile: FlowProfile) -> dict[str, object]:
             values[name] = "2026-01-01T00:00:00+00:00"
         elif definition.type is FlowInputType.DOCUMENT_SOURCE:
             values[name] = {
-                "source": next(iter(sorted(definition.allowed_sources)), "generate"),
+                "source": next(iter(sorted(definition.allowed_sources)), "temporary"),
                 "id": "00000000-0000-0000-0000-000000000002",
                 **(
                     {"version": "00000000-0000-0000-0000-000000000003"}
@@ -309,7 +310,7 @@ def _normalize_input(name: str, definition: FlowInputDefinition, value):
             raise FlowProfileError(
                 f"Flow input {name} document source has unknown fields"
             )
-        source = value.get("source")
+        source = value.get("source", "temporary")
         identifier = value.get("id")
         version = value.get("version")
         if not isinstance(source, str) or not source:

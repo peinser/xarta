@@ -28,6 +28,8 @@ from xarta.mcp.archive import ArchiveClient
 from xarta.mcp.configuration import MCPConfiguration
 from xarta.mcp.documents import DocumentTypeClient
 from xarta.mcp.intake import IntakeClient
+from xarta.mcp.peppol import PeppolClient
+from xarta.mcp.ubl import UBLClient
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +37,7 @@ class MCPDependencies:
     intake: IntakeClient
     documents: DocumentTypeClient
     archive: ArchiveClient
+    session: aiohttp.ClientSession
 
 
 def create_mcp_server(configuration: MCPConfiguration) -> MCPServer[MCPDependencies]:
@@ -66,6 +69,7 @@ def create_mcp_server(configuration: MCPConfiguration) -> MCPServer[MCPDependenc
                     configuration.archive_base_url,
                     configuration.request_timeout_seconds,
                 ),
+                session=session,
             )
             try:
                 yield active_dependencies
@@ -76,7 +80,7 @@ def create_mcp_server(configuration: MCPConfiguration) -> MCPServer[MCPDependenc
         "xarta",
         title="Xarta document workflows",
         description=(
-            "Discover document types, construct workflows and retrieve archived documents."
+            "Discover document types, construct workflows, validate UBL, check Peppol registration and retrieve archived documents."
         ),
         instructions=(
             "Consult document types before constructing rendered documents. Call "
@@ -84,9 +88,13 @@ def create_mcp_server(configuration: MCPConfiguration) -> MCPServer[MCPDependenc
             "flow profile when one matches the request. Otherwise compose deployed "
             "capabilities through outcome edges, then call prepare_flow to validate and "
             "quote before submit_flow. A 402 result includes payment_required; authorize "
-            "those x402 v2 terms and retry the identical submission with payment_signature."
+            "those x402 v2 terms and retry the identical submission with payment_signature. "
+            "When available, use list_ubl_validation_profiles and the UBL validation tools "
+            "to check actual document contents; prepare_flow only checks workflow intent. "
+            "For Peppol registration, inspect body.registered and body.status: null/indeterminate "
+            "is not false/not_registered, and registration does not guarantee document delivery."
         ),
-        version="1.1.0",
+        version="1.2.0",
         lifespan=lifespan,
     )
 
@@ -170,6 +178,83 @@ def create_mcp_server(configuration: MCPConfiguration) -> MCPServer[MCPDependenc
     async def get_capabilities(ctx: Context[MCPDependencies]) -> dict[str, Any]:
         """Return the complete recursive flow schema, deployed node explanations/examples, outcomes and pricing state."""
         return await intake(ctx).get("/capabilities")
+
+    if configuration.ubl_base_url is not None:
+        ubl_base_url = configuration.ubl_base_url
+
+        def ubl_client(ctx: Context[MCPDependencies]) -> UBLClient:
+            return UBLClient(
+                ctx.request_context.lifespan_context.session,
+                ubl_base_url,
+                configuration.validation_timeout_seconds,
+                configuration.ubl_max_document_bytes,
+            )
+
+        @server.tool(
+            annotations=ToolAnnotations(
+                read_only_hint=True,
+                destructive_hint=False,
+                idempotent_hint=True,
+                open_world_hint=False,
+            )
+        )
+        async def list_ubl_validation_profiles(
+            ctx: Context[MCPDependencies],
+        ) -> dict[str, Any]:
+            """List deployed UBL validation profiles, pinned rule releases and checksums."""
+            return await ubl_client(ctx).profiles()
+
+        @server.tool(
+            annotations=ToolAnnotations(
+                read_only_hint=True,
+                destructive_hint=False,
+                idempotent_hint=True,
+                open_world_hint=False,
+            )
+        )
+        async def validate_ubl_schema(
+            xml: str, ctx: Context[MCPDependencies]
+        ) -> dict[str, Any]:
+            """Validate a UTF-8 XML string against UBL XSDs without storing or sending it. Inspect body.valid; HTTP 200 can contain validation failures."""
+            return await ubl_client(ctx).validate_schema(xml)
+
+        @server.tool(
+            annotations=ToolAnnotations(
+                read_only_hint=True,
+                destructive_hint=False,
+                idempotent_hint=True,
+                open_world_hint=False,
+            )
+        )
+        async def validate_ubl_business_rules(
+            xml: str,
+            ctx: Context[MCPDependencies],
+            profile: str = "peppol-bis-billing-3",
+        ) -> dict[str, Any]:
+            """Validate UBL schema and business rules, including Belgian Peppol identifier rules. Discover profiles first. Preserve issues and valid:null engine-unavailable results."""
+            return await ubl_client(ctx).validate_business_rules(xml, profile)
+
+    if configuration.peppol_base_url is not None:
+        peppol_base_url = configuration.peppol_base_url
+
+        @server.tool(
+            annotations=ToolAnnotations(
+                read_only_hint=True,
+                destructive_hint=False,
+                idempotent_hint=True,
+                open_world_hint=True,
+            )
+        )
+        async def check_peppol_participant_registration(
+            scheme: str, identifier: str, ctx: Context[MCPDependencies]
+        ) -> dict[str, Any]:
+            """Check a participant through SML DNS and SMP. Scheme is the four-digit ICD (e.g. 0208). registered:null means indeterminate, never unregistered. Registration is not Access Point liveness or document-type support."""
+            client = PeppolClient(
+                ctx.request_context.lifespan_context.session,
+                peppol_base_url,
+                configuration.request_timeout_seconds,
+            )
+            return await client.participant_registration(scheme, identifier)
 
     @server.tool(
         annotations=ToolAnnotations(

@@ -16,11 +16,10 @@ from uuid import UUID
 
 import orjson
 
-from xarta.concurrency import bounded_map
 from xarta.exceptions.protocol import HTTPClientError
 from xarta.http.sessions import HTTPRequestManager
-from xarta.protocol.dag.archive.constants import ARCHIVE_SERVICE_ENDPOINT
-from xarta.protocol.dag.archive.constants import ARCHIVE_SERVICE_TIMEOUT
+from xarta.protocol.document.archive import ARCHIVE_SERVICE_ENDPOINT
+from xarta.protocol.document.archive import ARCHIVE_SERVICE_TIMEOUT
 from xarta.protocol.document.archive import ArchiveDocumentVersion
 from xarta.protocol.document.archive import ArchiveRepresentation
 from xarta.protocol.document.request.bundle import BUNDLE_SERVICE_ENDPOINT
@@ -37,28 +36,29 @@ from xarta.protocol.template.engine import TemplateEnginesOptions
 from xarta.storage import get_temporary_storage
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+    from collections.abc import Iterable
     from typing import Final
 
     from aiohttp import ClientSession
 
 
-def parse(source: str = "generate", **kwargs) -> DocumentSource:
+def parse(source: str = "temporary", **kwargs) -> DocumentSource:
     r"""
-    By default, we assume a `generate` document source, which implies
-    the identifier refers to a document that has been generated in a
-    generate DAG node.
+    Omitted sources reference immutable temporary artifacts, regardless of which
+    node produced them.
     """
     match source:
         case ArchiveDocumentSource.IDENTIFIER:
             return ArchiveDocumentSource.parse(**kwargs)
         case BundleDocumentSource.IDENTIFIER:
             return BundleDocumentSource.parse(**kwargs)
-        case GenerateDocumentSource.IDENTIFIER:
-            return GenerateDocumentSource.parse(**kwargs)
+        case TemporaryDocumentSource.IDENTIFIER:
+            return TemporaryDocumentSource.parse(**kwargs)
         case RenderDocumentSource.IDENTIFIER:
             return RenderDocumentSource.parse(**kwargs)
         case _:
-            raise ValueError
+            raise ValueError(f"Unknown document source: {source!r}")
 
 
 @dataclass
@@ -86,6 +86,7 @@ class DocumentSourceResult:
         storage = get_temporary_storage()
         key = _storage_key(self.id)
         objects = (
+            (key, self.data, self.content_type),
             (
                 f"{key}.json",
                 orjson.dumps(
@@ -98,9 +99,10 @@ class DocumentSourceResult:
                 ),
                 "application/json",
             ),
-            (key, self.data, self.content_type),
         )
-        await bounded_map(objects, len(objects), lambda item: storage.put(*item))
+        # Metadata is the completion marker; never publish it before the bytes.
+        for item in objects:
+            await storage.put(*item)
 
     @staticmethod
     def parse(
@@ -323,11 +325,13 @@ class ArchiveDocumentSource(DocumentSource):
         )
 
 
-class GenerateDocumentSource(DocumentSource):
-    IDENTIFIER: Final[str] = "generate"
+class TemporaryDocumentSource(DocumentSource):
+    """Retrieve a materialized document from the configured temporary backend."""
+
+    IDENTIFIER: Final[str] = "temporary"
 
     def __init__(self, id: UUID):
-        super().__init__(id=id, source=GenerateDocumentSource.IDENTIFIER)
+        super().__init__(id=UUID(str(id)), source=TemporaryDocumentSource.IDENTIFIER)
 
     @staticmethod
     async def _load(id: UUID) -> DocumentSourceResult:
@@ -344,11 +348,24 @@ class GenerateDocumentSource(DocumentSource):
         return DocumentSourceResult.parse(**metadata)
 
     async def retrieve(self, **kwargs) -> DocumentSourceResult:
-        return await GenerateDocumentSource._load(self.id)
+        return await TemporaryDocumentSource._load(self.id)
 
     @staticmethod
     def parse(id: UUID, **kwargs) -> DocumentSource:
-        return GenerateDocumentSource(id=id)
+        if kwargs:
+            raise ValueError("Temporary document references only accept source and id")
+        return TemporaryDocumentSource(id=id)
+
+
+def reject_input_overwrite(
+    inputs: Iterable[DocumentSource], outputs: Collection[UUID]
+) -> None:
+    """Reject a node whose output IDs would replace one of its temporary inputs."""
+    if any(
+        isinstance(document, TemporaryDocumentSource) and document.id in outputs
+        for document in inputs
+    ):
+        raise ValueError("Output cannot overwrite a temporary input document")
 
 
 def _storage_key(id: UUID) -> str:

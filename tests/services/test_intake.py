@@ -215,7 +215,7 @@ def test_prepare_reports_actionable_node_validation_error() -> None:
                 "dag": {
                     "kind": "sftp",
                     "document": {
-                        "source": "generate",
+                        "source": "temporary",
                         "id": "10000000-0000-0000-0000-000000000001",
                     },
                     "path": "../private/document.pdf",

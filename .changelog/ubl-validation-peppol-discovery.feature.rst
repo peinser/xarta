@@ -1,0 +1,1 @@
+Bundle pinned UBL 2.1 schemas and Peppol BIS Billing 3 rules, expose schema and business-rule validation APIs including Belgian identifier rules, and add direct SML/SMP participant discovery with explicit definitive and indeterminate results. General UBL editing accepts valid MIME types; the official billing validator enforces the Peppol subset.

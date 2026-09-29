@@ -14,7 +14,7 @@ from xarta.protocol.dag import CapabilityResult
 from xarta.protocol.dag import OutcomeEmission
 from xarta.protocol.dag.signature import SignatureNode
 from xarta.protocol.document.source import DocumentSourceResult
-from xarta.protocol.document.source import GenerateDocumentSource
+from xarta.protocol.document.source import TemporaryDocumentSource
 
 if TYPE_CHECKING:
     from sanic import Sanic
@@ -30,7 +30,7 @@ async def _sign(
 ) -> None:
     source = await request.source.retrieve()
     try:
-        existing = await GenerateDocumentSource(request.output_id).retrieve()
+        existing = await TemporaryDocumentSource(request.output_id).retrieve()
         if not await components.pdf_validator.matches_existing_output(
             source=source.data,
             signed=existing.data,
@@ -54,7 +54,7 @@ async def _sign(
         ).persist()
     except FileExistsError:
         # A concurrent delivery may have won the immutable output key.
-        existing = await GenerateDocumentSource(request.output_id).retrieve()
+        existing = await TemporaryDocumentSource(request.output_id).retrieve()
         if not await components.pdf_validator.matches_existing_output(
             source=source.data,
             signed=existing.data,

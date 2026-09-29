@@ -67,6 +67,18 @@ spec:
           value: http://{{ $documenttype }}/api/v1/document-type
         - name: MCP_ARCHIVE_BASE_URL
           value: http://{{ $archive }}/api/v1/archive
+        {{- if .Values.services.ubl.enabled }}
+        - name: MCP_UBL_BASE_URL
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "ubl") }}/api/v1/ubl
+        {{- end }}
+        {{- if .Values.services.peppol.enabled }}
+        - name: MCP_PEPPOL_BASE_URL
+          value: http://{{ include "service.name" (dict "release" $.Release "name" "peppol") }}/api/v1/peppol
+        {{- end }}
+        - name: MCP_VALIDATION_TIMEOUT_SECONDS
+          value: {{ .Values.services.mcp.settings.validationTimeoutSeconds | quote }}
+        - name: MCP_UBL_MAX_DOCUMENT_BYTES
+          value: {{ .Values.services.mcp.settings.ublMaxDocumentBytes | quote }}
         - name: MCP_REQUEST_TIMEOUT_SECONDS
           value: {{ .Values.services.mcp.settings.requestTimeoutSeconds | quote }}
         - name: MCP_ARCHIVE_MAX_RESOURCE_BYTES

@@ -69,6 +69,8 @@ Run `make help` to list all targets.
   and `verify` scripts and append the change to `sqitch.plan`, in `db/` for the
   application schema or `db/archive/` for the archive schema. `make db-deploy` applies
   them locally.
+  Keep deployed plan entries and scripts in history even when their service is removed:
+  deleting an old plan entry changes the IDs of later changes and breaks existing databases.
 - Published flow-profile versions are immutable. A semantic change needs a new version,
   and `examples/configuration/flow-profile-lock.json` is append-only. See
   [Flow profiles](docs/flow-profiles.md).

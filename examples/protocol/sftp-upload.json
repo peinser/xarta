@@ -6,7 +6,7 @@
     "kind": "sftp",
     "destination": "partner-sftp",
     "document": {
-      "source": "generate",
+      "source": "temporary",
       "id": "93000000-0000-0000-0000-000000000001"
     },
     "path": "invoices/2026/INV-2026-0042.pdf",

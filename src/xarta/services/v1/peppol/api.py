@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sanic import response
 
+from xarta.services.v1.peppol.models import PeppolParticipant
 from xarta.services.v1.peppol.nats import RecommandCallbackNATSModel
 from xarta.services.v1.peppol.webhooks import accept_recommand_webhook
 from xarta.services.v1.peppol.webhooks import apply_e_invoice_be_webhook
@@ -77,3 +78,13 @@ async def peppol_operation_status(request, operation_id: str):
             ],
         }
     )
+
+
+async def participant_registration(request, scheme: str, identifier: str):
+    try:
+        result = await request.app.ctx.peppol_discovery.check(
+            PeppolParticipant(scheme, identifier)
+        )
+    except ValueError as ex:
+        return response.json({"error": str(ex)}, status=400)
+    return response.json(result.dict(), headers={"Cache-Control": "no-store"})

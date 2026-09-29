@@ -29,7 +29,7 @@ def test_search_index_node_round_trip_and_outcomes() -> None:
     assert parse(node.dict()).dict() == node.dict()
 
 
-@pytest.mark.parametrize("missing", ["source", "id"])
+@pytest.mark.parametrize("missing", ["id"])
 def test_search_index_requires_immutable_source_identity(missing: str) -> None:
     value = specification()
     del value["document"][missing]

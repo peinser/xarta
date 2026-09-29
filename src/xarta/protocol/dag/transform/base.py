@@ -95,13 +95,6 @@ class TransformNode(Node):
         except (TypeError, ValueError) as ex:
             raise ValueError("Transform output must be a UUID") from ex
 
-    @staticmethod
-    def _reject_generated_collision(document: DocumentSource, output_id: UUID) -> None:
-        if document.source == source.GenerateDocumentSource.IDENTIFIER and str(
-            document.id
-        ) == str(output_id):
-            raise ValueError("Transform output cannot overwrite an input document")
-
     def interpret(self) -> TransformConvert | TransformMerge | TransformSplit:
         if self._convert is not None:
             document = self._source(self._convert.get("document"))
@@ -111,7 +104,7 @@ class TransformNode(Node):
                 raise ValueError(
                     "Transform convert currently supports application/pdf output only"
                 )
-            self._reject_generated_collision(document, output_id)
+            source.reject_input_overwrite((document,), {output_id})
             return TransformConvert(document, output_id, content_type)
 
         if self._merge is not None:
@@ -120,8 +113,7 @@ class TransformNode(Node):
                 raise ValueError("Transform merge requires between 2 and 25 documents")
             documents = tuple(self._source(value) for value in raw_documents)
             output_id = self._output(self._merge.get("out"))
-            for document in documents:
-                self._reject_generated_collision(document, output_id)
+            source.reject_input_overwrite(documents, {output_id})
             return TransformMerge(documents, output_id)
 
         assert self._split is not None
@@ -151,9 +143,9 @@ class TransformNode(Node):
             output_id = self._output(raw.get("out"))
             if output_id in seen:
                 raise ValueError("Transform split output IDs must be unique")
-            self._reject_generated_collision(document, output_id)
             seen.add(output_id)
             outputs.append(TransformSplitOutput(start, end, output_id))
+        source.reject_input_overwrite((document,), seen)
         return TransformSplit(document, tuple(outputs))
 
     def dict(self) -> dict:

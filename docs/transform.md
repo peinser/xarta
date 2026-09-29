@@ -10,7 +10,7 @@ Exactly one of `convert`, `merge`, or `split` must be present on a transform nod
 {
   "kind": "transform",
   "convert": {
-    "document": {"source": "generate", "id": "11111111-1111-1111-1111-111111111111"},
+    "document": {"id": "11111111-1111-1111-1111-111111111111"},
     "out": "22222222-2222-2222-2222-222222222222",
     "content_type": "application/pdf"
   }
@@ -42,8 +42,8 @@ Content-type parameters such as `charset` are ignored when selecting the convert
   "kind": "transform",
   "merge": {
     "documents": [
-      {"source": "generate", "id": "11111111-1111-1111-1111-111111111111"},
-      {"source": "generate", "id": "22222222-2222-2222-2222-222222222222"}
+      {"id": "11111111-1111-1111-1111-111111111111"},
+      {"id": "22222222-2222-2222-2222-222222222222"}
     ],
     "out": "33333333-3333-3333-3333-333333333333"
   }
@@ -60,7 +60,7 @@ A merged representation does not inherit `document_type` or metadata from an arb
 {
   "kind": "transform",
   "split": {
-    "document": {"source": "generate", "id": "11111111-1111-1111-1111-111111111111"},
+    "document": {"id": "11111111-1111-1111-1111-111111111111"},
     "outputs": [
       {"pages": {"start": 1, "end": 3}, "out": "22222222-2222-2222-2222-222222222222"},
       {"pages": {"start": 4, "end": 4}, "out": "33333333-3333-3333-3333-333333333333"}
@@ -77,13 +77,13 @@ Split outputs do not inherit the source `document_type` or metadata because a pa
 
 ## Outputs and redelivery
 
-Transform outputs are ordinary temporary generated documents. Downstream nodes reference them with:
+Transform outputs are ordinary temporary documents. Downstream nodes reference them with:
 
 ```json
-{"source": "generate", "id": "<transform output UUID>"}
+{"id": "<transform output UUID>"}
 ```
 
-There is no separate `source: transform` storage model.
+Omitted `source` means `temporary`; the explicit spelling is `source: "temporary"`. There is no separate `source: transform` storage model. See [temporary storage](temporary-storage.md) for the shared output convention.
 
 Temporary output storage is immutable. On JetStream redelivery, Xarta reuses an already-persisted output UUID instead of invoking Gotenberg again. For a partially completed split, persisted outputs are reused and only missing outputs are generated. A concurrent create race also reuses the persisted winner after validating its expected content type and semantic metadata.
 

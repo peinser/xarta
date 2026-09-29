@@ -1,0 +1,1 @@
+Use temporary storage as the default document-reference source, accept shared document references for PDF signing, and add schema-validated UBL Invoice/CreditNote attachment editing with pinned inputs and immutable outputs.

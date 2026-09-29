@@ -14,7 +14,7 @@ from xarta.protocol.dag.transform import TransformNode
 from xarta.protocol.dag.transform import TransformSplit
 from xarta.protocol.dag.transform import TransformSplitOutput
 from xarta.protocol.document.source import DocumentSourceResult
-from xarta.protocol.document.source import GenerateDocumentSource
+from xarta.protocol.document.source import TemporaryDocumentSource
 from xarta.protocol.document.type import DocumentTypeIdentifier
 
 from .gotenberg import PDF_CONTENT_TYPE
@@ -65,7 +65,7 @@ async def _existing_output(
     metadata: dict | None,
 ) -> DocumentSourceResult | None:
     try:
-        existing = await GenerateDocumentSource(output_id).retrieve()
+        existing = await TemporaryDocumentSource(output_id).retrieve()
     except FileNotFoundError:
         return None
     if (

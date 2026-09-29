@@ -12,7 +12,7 @@ import xarta.protocol.dag
 
 from xarta.protocol.dag import Node
 from xarta.protocol.document import source
-from xarta.protocol.document.source import GenerateDocumentSource
+from xarta.protocol.document.source import TemporaryDocumentSource
 
 if TYPE_CHECKING:
     from typing import Final
@@ -22,13 +22,13 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class EmailAttachment(GenerateDocumentSource):
+class EmailAttachment(TemporaryDocumentSource):
     filename: str | None = None
 
     @staticmethod
     def parse(id: UUID, filename: str | None) -> EmailAttachment:
         return EmailAttachment(
-            source=GenerateDocumentSource.IDENTIFIER,
+            source=TemporaryDocumentSource.IDENTIFIER,
             id=id,
             filename=filename,
         )

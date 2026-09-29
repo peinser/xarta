@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from xarta.protocol.dag.archive.constants import ARCHIVE_SERVICE_ENDPOINT
+from xarta.protocol.document.archive import ARCHIVE_SERVICE_ENDPOINT
 
 from .base import bp
 from .utils import qr

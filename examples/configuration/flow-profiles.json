@@ -2,15 +2,15 @@
   "schema_version": 1,
   "profiles": {
     "development-standard": {
-      "current_version": 1,
+      "current_version": 2,
       "versions": {
-        "1": {
+        "2": {
           "description": "Development-only example profile",
-          "fingerprint": "sha256:3db653ad661e010cd6c13b73820e3c0ea34b1d6ec311756c961ffc69ceb003f3",
+          "fingerprint": "sha256:cb7d32022b7b8cac7bfee98c939dc52aac1ebe34c06088642d46fdc70f315c61",
           "inputs": {
             "document": {
               "type": "document-source",
-              "allowed_sources": ["generate"]
+              "allowed_sources": ["temporary"]
             }
           },
           "dag": {

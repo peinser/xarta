@@ -9,7 +9,7 @@
       "expires": "2036-08-26T00:00:00+00:00",
       "representations": [{
         "source": {
-          "source": "generate",
+          "source": "temporary",
           "id": "91000000-0000-0000-0000-000000000001"
         }
       }]

@@ -41,9 +41,12 @@ class PeppolNode(Node):
         if not isinstance(document, Mapping):
             raise TypeError("Peppol document must be an object")
         specification = dict(document)
-        for name in ("source", "id"):
-            if not isinstance(specification.get(name), str) or not specification[name]:
-                raise ValueError(f"Peppol document requires a non-empty {name}")
+        if not isinstance(specification.get("id"), str) or not specification["id"]:
+            raise ValueError("Peppol document requires a non-empty id")
+        if "source" in specification and (
+            not isinstance(specification["source"], str) or not specification["source"]
+        ):
+            raise ValueError("Peppol document source must be a non-empty string")
         version = specification.get("version")
         if version is not None and (not isinstance(version, str) or not version):
             raise ValueError("Peppol document version must be a non-empty string")

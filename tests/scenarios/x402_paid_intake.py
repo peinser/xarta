@@ -74,9 +74,7 @@ def flow(ids: dict[str, str], index: int) -> dict[str, Any]:
                     "version_id": ids["version"],
                     "document_type": None,
                     "metadata": {"scenario": "x402-paid-intake", "sequence": index},
-                    "representations": [
-                        {"source": {"source": "generate", "id": ids["document"]}}
-                    ],
+                    "representations": [{"source": {"id": ids["document"]}}],
                 }
             ],
         },

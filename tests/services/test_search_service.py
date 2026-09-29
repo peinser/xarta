@@ -237,7 +237,7 @@ async def test_postgresql_adapter_inserts_new_source_version() -> None:
 async def test_postgresql_adapter_distinguishes_unchanged_and_digest_conflict() -> None:
     identifier = uuid4()
     document = SearchableDocument(
-        source=DocumentSearchSource("generate", uuid4(), "v1"),
+        source=DocumentSearchSource("temporary", uuid4(), "v1"),
         projection_revision="v1",
         digest="a" * 64,
         content_type="text/plain",
@@ -452,11 +452,11 @@ async def test_search_worker_indexes_pdf_metadata_without_extraction(
     )
     document_id = uuid4()
     node = SearchIndexNode(
-        document={"source": "generate", "id": str(document_id), "version": "v1"},
+        document={"source": "temporary", "id": str(document_id), "version": "v1"},
         destination="documents",
     )
     source = SimpleNamespace(
-        source="generate",
+        source="temporary",
         id=document_id,
         retrieve=AsyncMock(
             return_value=SimpleNamespace(
@@ -569,14 +569,14 @@ async def test_search_retry_resolves_current_configuration_revision(
     document_id = uuid4()
     node = SearchIndexNode(
         document={
-            "source": "generate",
+            "source": "temporary",
             "id": str(document_id),
             "version": "v1",
         },
         destination="documents",
     )
     source = SimpleNamespace(
-        source="generate",
+        source="temporary",
         id=document_id,
         retrieve=AsyncMock(
             return_value=SimpleNamespace(

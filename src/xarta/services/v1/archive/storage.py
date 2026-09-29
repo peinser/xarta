@@ -19,7 +19,10 @@ from xarta.storage.s3 import S3ClientManager
 
 class StorageBackend(Protocol):
     async def put(self, key: str, data: bytes, content_type: str) -> bool:
-        """Store immutable bytes and return whether this call created them."""
+        """Store immutable bytes and return whether this call created them.
+
+        Raise FileExistsError when the key already holds different bytes.
+        """
         ...
 
     async def get(self, key: str) -> bytes: ...
@@ -136,8 +139,12 @@ class S3StorageBackend:
             return True
         except ClientError as ex:
             status = ex.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-            if status != 412 or await self.get(key) != data:
+            if status != 412:
                 raise
+            if await self.get(key) != data:
+                raise FileExistsError(
+                    f"Immutable storage key already exists: {key}"
+                ) from ex
             return False
 
     async def get(self, key: str) -> bytes:

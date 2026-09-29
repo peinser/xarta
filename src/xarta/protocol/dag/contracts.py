@@ -30,13 +30,13 @@ def _object(
 
 
 DOCUMENT_SOURCE_DEFINITIONS: dict[str, dict[str, Any]] = {
-    "generated_document": _object(
+    "temporary_document": _object(
         {
-            "source": {"const": "generate"},
+            "source": {"const": "temporary", "default": "temporary"},
             "id": UUID,
         },
         ("id",),
-        description="A document produced or uploaded under this flow's generated-document ID.",
+        description="An immutable temporary document. Omitted source defaults to temporary.",
     ),
     "archived_document": _object(
         {
@@ -115,7 +115,7 @@ DOCUMENT_SOURCE_DEFINITIONS: dict[str, dict[str, Any]] = {
     ),
     "document_source": {
         "oneOf": [
-            {"$ref": "#/$defs/generated_document"},
+            {"$ref": "#/$defs/temporary_document"},
             {"$ref": "#/$defs/archived_document"},
             {"$ref": "#/$defs/rendered_document"},
             {"$ref": "#/$defs/bundled_document"},
@@ -142,7 +142,7 @@ DOCUMENT_SOURCE_DEFINITIONS["bundle_node_document"] = {
             (*DOCUMENT_SOURCE_DEFINITIONS[name].get("required", []), "filename"),
         )
         for name in (
-            "generated_document",
+            "temporary_document",
             "archived_document",
             "rendered_document",
             "bundled_document",
@@ -205,13 +205,13 @@ DOCUMENT_SOURCE_DEFINITIONS["archive_version"] = {
 
 
 POSTAL_DEFINITIONS: dict[str, dict[str, Any]] = {
-    "postal_generated_document": _object(
+    "postal_temporary_document": _object(
         {
-            "source": {"const": "generate"},
+            "source": {"const": "temporary", "default": "temporary"},
             "id": UUID,
             "role": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
         },
-        ("source", "id"),
+        ("id",),
     ),
     "postal_archived_document": _object(
         {
@@ -230,7 +230,7 @@ POSTAL_DEFINITIONS: dict[str, dict[str, Any]] = {
     ),
     "postal_document": {
         "oneOf": [
-            {"$ref": "#/$defs/postal_generated_document"},
+            {"$ref": "#/$defs/postal_temporary_document"},
             {"$ref": "#/$defs/postal_archived_document"},
             {"$ref": "#/$defs/postal_rendered_document"},
         ]
@@ -383,7 +383,7 @@ NODE_DETAILS: dict[str, dict[str, Any]] = {
                         {
                             "name": "invoice.pdf",
                             "source": {
-                                "source": "generate",
+                                "source": "temporary",
                                 "id": "11111111-1111-1111-1111-111111111111",
                             },
                         }
@@ -409,7 +409,7 @@ NODE_DETAILS: dict[str, dict[str, Any]] = {
             "kind": "bundle",
             "documents": [
                 {
-                    "source": "generate",
+                    "source": "temporary",
                     "id": "11111111-1111-1111-1111-111111111111",
                     "filename": "documents.pdf",
                 }
@@ -451,7 +451,7 @@ NODE_DETAILS: dict[str, dict[str, Any]] = {
             "kind": "doccle",
             "receiver": {"id": "receiver-1"},
             "document": {
-                "source": "generate",
+                "source": "temporary",
                 "id": "11111111-1111-1111-1111-111111111111",
             },
             "document_type": "invoice",
@@ -503,7 +503,7 @@ NODE_DETAILS: dict[str, dict[str, Any]] = {
         "example": {
             "kind": "peppol",
             "document": {
-                "source": "generate",
+                "source": "temporary",
                 "id": "11111111-1111-1111-1111-111111111111",
             },
         },
@@ -531,7 +531,7 @@ NODE_DETAILS: dict[str, dict[str, Any]] = {
                 "content": {
                     "documents": [
                         {
-                            "source": "generate",
+                            "source": "temporary",
                             "id": "11111111-1111-1111-1111-111111111111",
                         }
                     ]
@@ -566,7 +566,7 @@ NODE_DETAILS: dict[str, dict[str, Any]] = {
         "example": {
             "kind": "search-index",
             "document": {
-                "source": "generate",
+                "source": "temporary",
                 "id": "11111111-1111-1111-1111-111111111111",
             },
             "destination": "documents",
@@ -590,18 +590,20 @@ NODE_DETAILS: dict[str, dict[str, Any]] = {
         "example": {
             "kind": "sftp",
             "document": {
-                "source": "generate",
+                "source": "temporary",
                 "id": "11111111-1111-1111-1111-111111111111",
             },
             "path": "out/document.pdf",
         },
     },
     "signature": {
-        "description": "Create signed output documents from generated input document IDs.",
+        "description": "Sign referenced PDFs and write the results to temporary storage.",
         "properties": {
             "documents": {
                 "type": "array",
-                "items": _object({"in": UUID, "out": UUID}, ("in", "out")),
+                "items": _object(
+                    {"document": _source_property(), "out": UUID}, ("document", "out")
+                ),
             },
             "policy": {
                 "type": ["string", "null"],
@@ -678,12 +680,62 @@ NODE_DETAILS: dict[str, dict[str, Any]] = {
             "kind": "transform",
             "convert": {
                 "document": {
-                    "source": "generate",
+                    "source": "temporary",
                     "id": "11111111-1111-1111-1111-111111111111",
                 },
                 "out": "22222222-2222-2222-2222-222222222222",
                 "content_type": "application/pdf",
             },
+        },
+    },
+    "ubl": {
+        "description": "Add embedded attachments to a UBL Invoice or CreditNote and publish a new temporary document.",
+        "properties": {
+            "document": _source_property(),
+            "operations": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 25,
+                "items": _object(
+                    {
+                        "action": {"const": "add_attachment"},
+                        "id": {"type": "string", "minLength": 1, "maxLength": 256},
+                        "document": _source_property(),
+                        "filename": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 255,
+                        },
+                        "description": {
+                            "type": ["string", "null"],
+                            "minLength": 1,
+                            "maxLength": 1024,
+                        },
+                    },
+                    ("action", "id", "document", "filename"),
+                ),
+            },
+            "out": UUID,
+        },
+        "required": ("document", "operations", "out"),
+        "runtime_constraints": [
+            "input and output must validate against the deployment's UBL 2.1 XSDs",
+            "signed XML, duplicate attachment IDs, and temporary input/output collisions are rejected",
+            "filename must be a basename; attachment MIME types and cumulative sizes are bounded",
+            "UBL schema validation does not replace Peppol business-profile validation",
+        ],
+        "example": {
+            "kind": "ubl",
+            "document": {"id": "11111111-1111-1111-1111-111111111111"},
+            "operations": [
+                {
+                    "action": "add_attachment",
+                    "id": "supporting-document-1",
+                    "document": {"id": "22222222-2222-2222-2222-222222222222"},
+                    "filename": "supporting-document.pdf",
+                }
+            ],
+            "out": "33333333-3333-3333-3333-333333333333",
         },
     },
     "wait-for": {

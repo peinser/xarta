@@ -1,0 +1,1 @@
+Expose optional read-only MCP tools for UBL validation profiles, schema and billing-rule validation, and Peppol participant registration. Preserve upstream validation diagnostics and tri-state registration evidence, with Compose/Helm configuration and agent guidance.

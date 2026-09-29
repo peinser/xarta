@@ -1070,6 +1070,15 @@ wheels = [
 ]
 
 [[package]]
+name = "dnspython"
+version = "2.8.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8c/8b/57666417c0f90f08bcafa776861060426765fdb422eb10212086fb811d26/dnspython-2.8.0.tar.gz", hash = "sha256:181d3c6996452cb1189c4046c61599b84a5a86e099562ffde77d26984ff26d0f", size = 368251, upload-time = "2025-09-07T18:58:00.022Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ba/5a/18ad964b0086c6e62e2e7500f7edc89e3faa45033c71c1893d34eed2b2de/dnspython-2.8.0-py3-none-any.whl", hash = "sha256:01d9bbc4a2d76bf0db7c1f729812ded6d912bd318d3b1cf81d30c0f845dbf3af", size = 331094, upload-time = "2025-09-07T18:57:58.071Z" },
+]
+
+[[package]]
 name = "dparse"
 version = "0.6.4"
 source = { registry = "https://pypi.org/simple" }
@@ -3138,6 +3147,28 @@ wheels = [
 ]
 
 [[package]]
+name = "saxonche"
+version = "12.10.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5e/28/3c4e0187a52f39c7f7f6d62d336e34bc4706841e5d0e419412f2de99a684/saxonche-12.10.0-cp311-cp311-macosx_10_11_x86_64.whl", hash = "sha256:2c81566f8150c8fdba91b606c3ee6d681b8c25c2894af31187524f3836ad5bec", size = 38355332, upload-time = "2026-07-14T06:05:43.562Z" },
+    { url = "https://files.pythonhosted.org/packages/71/aa/6769779ec9b3b0c976a7576ab2ba67536eaec24babc0f40f5e50050609c4/saxonche-12.10.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:ee5bf407b10b15b946cd536ecb396751efaf6e8158934d1cb683dcde31b3950f", size = 37023226, upload-time = "2026-07-14T06:05:48.717Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/27/de2a2fc3e1ea6ec396ae0d61ead68184e949406f6886a140814e2d908941/saxonche-12.10.0-cp311-cp311-manylinux_2_24_aarch64.whl", hash = "sha256:bc7abe23e4fbcccb48016a5e1a5adb728b50bd5a8979123276428640ef78c711", size = 40023345, upload-time = "2026-07-14T06:05:54.48Z" },
+    { url = "https://files.pythonhosted.org/packages/61/44/12e4f3c6aa1d17c7d35d8411dda52c6ff5c1c684d138159b31e27e2ade68/saxonche-12.10.0-cp311-cp311-manylinux_2_24_x86_64.whl", hash = "sha256:0ced37b4f3a9ecf6ba167b2902839a40113dcbce6b0806b7aadbaa31c9a05596", size = 40935536, upload-time = "2026-07-14T06:06:00.062Z" },
+    { url = "https://files.pythonhosted.org/packages/97/1f/01b6db8707bcb4eed727187852ffdb06a06d80d6af8ce23ae339e783e9da/saxonche-12.10.0-cp311-cp311-win_amd64.whl", hash = "sha256:76ed037703a5bfdd81c5e94fba9b414349c351db6c108aa0761a41be545d111a", size = 37775505, upload-time = "2026-07-14T06:06:05.613Z" },
+    { url = "https://files.pythonhosted.org/packages/40/c5/c58b60403499e9dd511b9655e2bd9c54dc20d9ea21c07da19defe4deedc9/saxonche-12.10.0-cp312-cp312-macosx_10_11_x86_64.whl", hash = "sha256:8dc5099149386dd61d507005ec949d4b712c6f83bda40fd71454d6d14f7733a9", size = 38352729, upload-time = "2026-07-14T06:06:11.031Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/b6/b601544be021b0d3963ecadacd904309c42b1900f5055204cf1a5636f58c/saxonche-12.10.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:165608647c7d9a00c4cfcb66c61f9a07c98edc6fbcc45f6908eb7b27ed917538", size = 37024669, upload-time = "2026-07-14T06:06:16.224Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/30/a7c09fe48e0907e98f870f82a009bf6d6169d8bd1c1be7d1dfaa8aaf6a78/saxonche-12.10.0-cp312-cp312-manylinux_2_24_aarch64.whl", hash = "sha256:c833a6ebe8b31898c284026b3d6c4af778b6c4fc44d85a7f31200da83df18216", size = 39900938, upload-time = "2026-07-14T06:06:21.804Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/38/9b6041436c054132d491b0d3f637799dfa8451dc69a831cb5498f0b6c552/saxonche-12.10.0-cp312-cp312-manylinux_2_24_x86_64.whl", hash = "sha256:fbd25a5408bf56778369bfe18a3650a61d85f5375f6fba6a72f7442d3c1cba6c", size = 40881857, upload-time = "2026-07-14T06:06:27.533Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/f2/8bc6750316967339c08f4a38af386bb4ae7b28f39080243b966b5ff9c79b/saxonche-12.10.0-cp312-cp312-win_amd64.whl", hash = "sha256:af03859f2c907c05f2c8dd46a706c4abd53f93ff932e95ccd40949f46cf02958", size = 37776552, upload-time = "2026-07-14T06:06:32.906Z" },
+    { url = "https://files.pythonhosted.org/packages/65/57/64db93581d93830aff55d75c78869adefe6acfd6a92ddeda5a2de445d87d/saxonche-12.10.0-cp313-cp313-macosx_10_11_x86_64.whl", hash = "sha256:fd6c414193ef92e7210b31c9c460f8544f8d85c638618febca2c05c40aff02b3", size = 38353491, upload-time = "2026-07-14T06:06:38.218Z" },
+    { url = "https://files.pythonhosted.org/packages/18/21/2334339ca0af5899e091181792b39ca2c9610edaec954350015673891cd1/saxonche-12.10.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:9268605d83ddced5362ad89d3c95c29f258280c4d1a1f6a0a375bfa812615971", size = 37023848, upload-time = "2026-07-14T06:06:44.155Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/de/8144cc78c2ae0fa63cd4b0b7daa8f6002e64df4d5a7ffc218b6ac721339c/saxonche-12.10.0-cp313-cp313-manylinux_2_24_aarch64.whl", hash = "sha256:82568caa4d509a1edc10f54f23919f52dcb06ecc2af055b1a61a9c339755f632", size = 39903495, upload-time = "2026-07-14T06:06:49.876Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/0c/ade74cf24ef19efc9666cd351eadb0c14d8194eee8c45ba51143a2bdb8a9/saxonche-12.10.0-cp313-cp313-manylinux_2_24_x86_64.whl", hash = "sha256:6d47075c1617955282bac5dccfebf9bb07fc03516ced2f113dbad96a773d77b2", size = 40836663, upload-time = "2026-07-14T06:06:55.403Z" },
+    { url = "https://files.pythonhosted.org/packages/2d/38/ee83800b55e0168f67cf2924b6cb5130521dc5134cf4cd2ac0a5dcaa1bbf/saxonche-12.10.0-cp313-cp313-win_amd64.whl", hash = "sha256:18649f2549afc403492053306e25283a7d1338fadc0d9876a282a6cf94a59a76", size = 37775898, upload-time = "2026-07-14T06:07:01.471Z" },
+]
+
+[[package]]
 name = "service-identity"
 version = "26.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3480,8 +3511,8 @@ name = "uvicorn"
 version = "0.52.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "click" },
-    { name = "h11" },
+    { name = "click", marker = "python_full_version < '3.12' or sys_platform != 'emscripten'" },
+    { name = "h11", marker = "python_full_version < '3.12' or sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f2/0f/3f86e61397dd33bf2ccf28188c40db6a740658aeebbbf6e7dbc101a1f487/uvicorn-0.52.4.tar.gz", hash = "sha256:73acfee47a0b133c5de13d219492d62d8a31e935f4fe6e41a232451a15379f86", size = 100627, upload-time = "2026-08-19T06:27:41.821Z" }
 wheels = [
@@ -3704,6 +3735,7 @@ dependencies = [
     { name = "bcrypt" },
     { name = "brotli" },
     { name = "cryptography" },
+    { name = "dnspython" },
     { name = "isodate" },
     { name = "jsonschema" },
     { name = "jwcrypto" },
@@ -3722,6 +3754,7 @@ dependencies = [
     { name = "pytz" },
     { name = "qrcode" },
     { name = "sanic" },
+    { name = "saxonche" },
     { name = "structlog" },
     { name = "uvloop" },
     { name = "websockets" },
@@ -3758,6 +3791,7 @@ requires-dist = [
     { name = "bcrypt", specifier = ">=5,<6" },
     { name = "brotli", specifier = ">=1.1.0,<2" },
     { name = "cryptography", specifier = ">=50,<51" },
+    { name = "dnspython", specifier = ">=2.8,<3" },
     { name = "isodate", specifier = ">=0.7,<0.8" },
     { name = "jsonschema", specifier = ">=4.21.1,<5" },
     { name = "jwcrypto", specifier = ">=1.5.6,<2" },
@@ -3776,6 +3810,7 @@ requires-dist = [
     { name = "pytz", specifier = ">=2026,<2027" },
     { name = "qrcode", specifier = ">=8.0,<9" },
     { name = "sanic", specifier = ">=25,<26" },
+    { name = "saxonche", specifier = ">=12.9,<13" },
     { name = "structlog", specifier = ">=26,<27" },
     { name = "uvloop", specifier = ">=0.22,<0.23" },
     { name = "websockets", specifier = ">=17,<18" },

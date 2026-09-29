@@ -177,7 +177,7 @@ def test_linear_and_conservative_branch_activation_bounds() -> None:
 def test_bundle_pricing_resolves_explicit_binding_and_rate() -> None:
     successor = Node(kind="generate")
     root = BundleNode(
-        documents=[{"source": "generate", "id": str(uuid4()), "filename": "input.txt"}],
+        documents=[{"id": str(uuid4()), "filename": "input.txt"}],
         out=uuid4(),
         on={"success": [successor]},
     )

@@ -56,3 +56,12 @@ Email, SFTP, archive outbound, and search service configuration builders require
 Every adapter must document its execution mode, idempotency scope and expiry, ambiguous side-effect boundary, duplicate-delivery behavior, retry safety, and available callback or reconciliation mechanism. Deterministic Xarta task identities must not be described as exactly-once external side effects unless the provider contract actually supplies that guarantee.
 
 - [ ] TODO: audit every existing adapter and add a dedicated limitations section covering these guarantees and failure boundaries.
+- [ ] TODO (needs investigation): a crash between writing a temporary output's data and
+  its metadata can leave that output ID stuck when the producer's bytes differ per run
+  (signature timestamps, Gotenberg conversions, archive versions of re-rendered sources).
+  The retry produces different bytes, the create-only write rejects them, and recovery
+  cannot adopt the stored bytes because it finds them through the missing metadata, so
+  the job retries until dead-lettered. For archive, the leftover object becomes a
+  `version_conflict` outcome. UBL is unaffected: its retries write identical bytes. A
+  candidate fix, to be checked for races: the first writer wins, and retries adopt the
+  stored data and rebuild the metadata, which derives from the request.

@@ -11,7 +11,7 @@
       }
     },
     "document": {
-      "source": "generate",
+      "source": "temporary",
       "id": "90000000-0000-0000-0000-000000000101"
     },
     "document_type": "invoice",

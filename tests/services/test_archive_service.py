@@ -520,7 +520,7 @@ def archive_task(monkeypatch, destination="archive-destination"):
                 "representations": [
                     {
                         "source": {
-                            "source": "generate",
+                            "source": "temporary",
                             "id": str(archived_document.id),
                         }
                     }

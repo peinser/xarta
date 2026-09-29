@@ -27,6 +27,14 @@ configuration = MCPConfiguration(
         "MCP_DOCUMENT_TYPE_BASE_URL", optional=False, dtype=str
     ),
     archive_base_url=env.extract("MCP_ARCHIVE_BASE_URL", optional=False, dtype=str),
+    ubl_base_url=env.extract("MCP_UBL_BASE_URL", dtype=str),
+    peppol_base_url=env.extract("MCP_PEPPOL_BASE_URL", dtype=str),
+    validation_timeout_seconds=env.extract(
+        "MCP_VALIDATION_TIMEOUT_SECONDS", default="35", dtype=float
+    ),
+    ubl_max_document_bytes=env.extract(
+        "MCP_UBL_MAX_DOCUMENT_BYTES", default="10485760", dtype=int
+    ),
     request_timeout_seconds=env.extract(
         "MCP_REQUEST_TIMEOUT_SECONDS", optional=False, dtype=float
     ),
