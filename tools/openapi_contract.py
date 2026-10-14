@@ -11,6 +11,8 @@ from copy import deepcopy
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
+from jsonschema import FormatChecker
+from jsonschema import ValidationError
 from jsonschema.validators import validator_for
 
 from xarta.protocol.dag import node_contract
@@ -91,6 +93,101 @@ def implemented_routes() -> set[tuple[str, str]]:
     return routes
 
 
+def check_examples(document: dict, validator: Draft202012Validator) -> None:
+    """Check curated examples at the schema and HTTP boundaries used by viewers."""
+    count = 0
+
+    def resolve(value):
+        while "$ref" in value:
+            target = document
+            for part in value["$ref"][2:].split("/"):
+                target = target[part.replace("~1", "/").replace("~0", "~")]
+            value = target
+        return value
+
+    def reject_placeholders(value):
+        if isinstance(value, dict):
+            if any(re.fullmatch(r"additionalProp\d+", key) for key in value):
+                raise ValueError("Replace additionalProp placeholders with domain data")
+            for child in value.values():
+                reject_placeholders(child)
+        elif isinstance(value, list):
+            for child in value:
+                reject_placeholders(child)
+
+    def validate(value, schema, location):
+        nonlocal count
+        try:
+            reject_placeholders(value)
+            validator.evolve(schema=schema).validate(value)
+            resolved = resolve(schema)
+            if resolved.get("contentMediaType") == "application/json":
+                decoded = json.loads(value)
+                reject_placeholders(decoded)
+                validator.evolve(schema=resolved["contentSchema"]).validate(decoded)
+        except (ValueError, ValidationError) as ex:
+            raise ValueError(f"Invalid example at {location}: {ex}") from ex
+        count += 1
+
+    def examples(value, location, required=False):
+        if required and not value.get("examples") and "example" not in value:
+            raise ValueError(f"Missing representative examples at {location}")
+        schema = value.get("schema", {})
+        if "example" in value:
+            validate(value["example"], schema, location)
+        for name, example in value.get("examples", {}).items():
+            example = resolve(example)
+            validate(example["value"], schema, f"{location}/{name}")
+
+    def content(value, location):
+        for media_type, media in resolve(value).get("content", {}).items():
+            if media_type.split(";", 1)[0].endswith(
+                ("/json", "+json", "/xml", "+xml")
+            ) and not media.get("examples"):
+                raise ValueError(f"Missing named examples at {location}/{media_type}")
+            schema_annotations(
+                media.get("schema", {}), f"{location}/{media_type}/schema"
+            )
+            examples(media, f"{location}/{media_type}")
+
+    def schema_annotations(schema, location):
+        if isinstance(schema, dict):
+            for index, example in enumerate(schema.get("examples", [])):
+                validate(example, schema, f"{location}/examples/{index}")
+            for key, value in schema.items():
+                if key not in {"examples", "example", "default", "enum", "const"}:
+                    schema_annotations(value, f"{location}/{key}")
+        elif isinstance(schema, list):
+            for index, value in enumerate(schema):
+                schema_annotations(value, f"{location}/{index}")
+
+    for name, schema in document["components"]["schemas"].items():
+        if not schema.get("examples"):
+            raise ValueError(f"Missing schema examples: {name}")
+        schema_annotations(schema, f"schemas/{name}")
+    for path, item in document["paths"].items():
+        for method, operation in item.items():
+            if method not in METHODS:
+                continue
+            location = f"{method.upper()} {path}"
+            if "requestBody" in operation:
+                content(operation["requestBody"], f"{location}/request")
+            for status, response in operation["responses"].items():
+                content(response, f"{location}/response/{status}")
+                for name, header in resolve(response).get("headers", {}).items():
+                    examples(resolve(header), f"{location}/header/{name}")
+            for parameter in item.get("parameters", []) + operation.get(
+                "parameters", []
+            ):
+                parameter = resolve(parameter)
+                examples(
+                    parameter,
+                    f"{location}/parameter/{parameter['name']}",
+                    required=True,
+                )
+    print(f"Validated {count} schema, request, response, and parameter examples")
+
+
 def check(document: dict) -> None:
     if document["openapi"] != "3.1.0":
         raise ValueError("Expected OpenAPI 3.1.0")
@@ -105,7 +202,11 @@ def check(document: dict) -> None:
     }:
         raise ValueError("Stale workflow schema inventory; run with --update-schemas")
     for name, expected in expected_schemas.items():
-        if document["components"]["schemas"].get(name) != expected:
+        actual = document["components"]["schemas"].get(name, {})
+        # Examples are curated documentation; executable validation stays authoritative.
+        if {key: value for key, value in actual.items() if key != "examples"} != {
+            key: value for key, value in expected.items() if key != "examples"
+        }:
             raise ValueError(f"Stale schema {name}; run with --update-schemas")
     for schema in document["components"]["schemas"].values():
         validator_for(schema, default=Draft202012Validator).check_schema(schema)
@@ -119,18 +220,24 @@ def check(document: dict) -> None:
                 target = document
                 for part in reference[2:].split("/"):
                     target = target[part.replace("~1", "/").replace("~0", "~")]
-            for child in value.values():
+            for key, child in value.items():
+                # Example payloads may themselves contain JSON Schema references.
+                if key in {"value", "example", "default", "enum", "const"} or (
+                    key == "examples" and isinstance(child, list)
+                ):
+                    continue
                 references(child)
         elif isinstance(value, list):
             for child in value:
                 references(child)
 
     references(document)
-    validator = Draft202012Validator(document)
+    validator = Draft202012Validator(document, format_checker=FormatChecker())
     for kind in supported_node_kinds():
         validator.evolve(
             schema={"$ref": f"#/components/schemas/Workflow_node_{kind}"}
         ).validate(node_contract(kind)["example"])
+    check_examples(document, validator)
     routes = set()
     operation_ids = set()
     for path, item in document["paths"].items():
@@ -172,14 +279,14 @@ def main() -> None:
     document = json.loads(CONTRACT.read_text())
     if arguments.update_schemas:
         schemas = document["components"]["schemas"]
+        refreshed = executable_schemas()
+        for name, schema in refreshed.items():
+            if "examples" in schemas.get(name, {}):
+                schema = {**schema, "examples": schemas[name]["examples"]}
+            schemas[name] = schema
         for name in list(schemas):
-            if name.startswith("Workflow_") or name in {
-                "RenderRequest",
-                "PreviewRequest",
-                "DocumentTypeCheckRequest",
-            }:
+            if name.startswith("Workflow_") and name not in refreshed:
                 del schemas[name]
-        schemas.update(executable_schemas())
         CONTRACT.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n")
     check(document)
 

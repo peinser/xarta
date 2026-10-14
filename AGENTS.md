@@ -17,9 +17,24 @@ Write this code for human maintainers, not for minimum line count.
   validation, capability outcomes, status codes, headers, media types,
   authentication, callbacks, pagination, and idempotency behavior. Document the
   implemented behavior, including deployment-dependent requirements.
+- Maintain thorough, representative examples with every contract change. Every
+  request/response JSON or XML media type needs named OpenAPI examples; every
+  reusable schema and request parameter needs concrete examples. Use realistic
+  synthetic domain data and consistent IDs across related requests, responses,
+  workflow nodes, and callbacks. Populate free-form maps with meaningful keys and
+  values, never `additionalProp1`, `string`, or empty-object filler. Empty objects
+  and arrays are appropriate only when they represent an actual empty state.
+- Cover meaningful alternatives: complete nonempty workflows and outcome branches,
+  profile inputs, validation failures, pending/completed states, pagination cursors,
+  idempotent replays, and provider feedback. Check examples against parsers and
+  serializers, not just schemas. Label configuration prerequisites and illustrative
+  cryptographic values; never include real secrets or personal data. For binary and
+  multipart operations, provide usable file-oriented `x-codeSamples` and concrete
+  JSON manifests instead of pretending filenames or placeholder text are file bytes.
 - Reuse executable DAG/render schemas: run
   `uv run --frozen python tools/openapi_contract.py --update-schemas` when those
-  definitions change, then review and update HTTP semantics manually.
+  definitions change, then review and update HTTP semantics manually. The refresh
+  preserves curated schema examples; update them when validation rules change.
 - Bump the contract's `info.version` appropriately and record compatibility notes
   in its `CHANGELOG.md`. Follow the pre-release/released versioning policy in
   `contracts/openapi/README.md`; flow-profile versions remain independently immutable.
