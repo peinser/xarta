@@ -60,7 +60,11 @@ Run `make help` to list all targets.
 - Keep each pull request focused on one change.
 - Add or update focused tests for every behavioral change.
 - Run `make verify` before pushing. It checks Black formatting, Ruff, mypy, the test
-  suite, Bandit, and the flow-profile lock. `make format` fixes formatting.
+  suite, Bandit, the flow-profile lock, and OpenAPI contract consistency. `make format` fixes formatting.
+- Update the [versioned OpenAPI contracts](contracts/openapi/README.md) in the same
+  change as any HTTP or workflow capability contract change, including validation,
+  outcomes, authentication, response codes, and headers. Update the contract version
+  and changelog, and run `make contracts-check`.
 - Run `make helm-verify` after Helm or Kubernetes changes, and `make docker-validate`
   after production container changes.
 - Change dependencies in `pyproject.toml` and run `make lock`. Never edit `uv.lock` by
