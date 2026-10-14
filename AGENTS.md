@@ -42,6 +42,36 @@ Write this code for human maintainers, not for minimum line count.
   also part of `make verify`. Keep operation IDs stable unless intentionally
   changing the client-facing contract.
 
+### API shape and consistency
+
+- Prefer resource-oriented JSON over a flat export of database columns. Within a
+  resource object, use `id` for its identity; group related identity and relationship
+  fields, for example `version: {id, parent}` rather than sibling `version_id` and
+  `parent_version_id`. A representation object should likewise identify itself as
+  `id`, not repeat its enclosing resource name in every property.
+- Nest fields when they describe one coherent concept, such as version identity,
+  representation selection, or content properties. Keep nesting shallow; do not add
+  wrapper objects merely to shorten a single field name or mirror internal classes.
+- Give the same concept consistent names, types, and structure across requests,
+  responses, detail views, and collections. Distinguish scalar references from
+  embedded objects explicitly: `version.parent` is a UUID or null, not a recursive
+  version object. Document intentional differences between creation inputs,
+  references, and resolved responses rather than making callers guess.
+- Make ownership and semantics clear: document/version metadata and representation
+  metadata are distinct; content availability is distinct from workflow progress.
+  Use specific names for states and timestamps, and document their scope and units.
+- Prefer concise write acknowledgements containing the outcome and resolved
+  resource identities. If returning a resource instead, return its consistent,
+  documented representation; avoid arbitrary partial snapshots that mix an
+  acknowledgement with selected detail fields. Expose internal replay, deduplication,
+  or storage bookkeeping only when callers have a concrete need for it.
+- Reuse established collection/pagination and error shapes. Separate stable
+  machine-readable error codes from human-readable messages; do not overload one
+  field with resource objects in one response and bare IDs in another.
+- Apply these preferences to new or explicitly revised contracts. Trace all
+  producers and consumers when changing a shape, and update serializers, parsers,
+  OpenAPI schemas, examples, and documentation together under the versioning policy.
+
 ## Safety
 
 - Before the first published release, remove or replace obsolete APIs, schemas,
