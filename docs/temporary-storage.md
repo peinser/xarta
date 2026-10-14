@@ -84,11 +84,3 @@ The binary and metadata use the same shard. The binary is written first and the 
 Cleanup removes objects older than its timezone-aware cutoff. Every invocation has an object limit. S3 listing is paginated and restricted to the configured prefix; filesystem traversal does not follow directory symlinks. Cleanup may therefore require multiple scheduled runs after a large backlog.
 
 Configuration errors, malformed metadata, transport errors, and permission failures are propagated. S3 missing-object responses are the only transport errors normalized to `FileNotFoundError`; no secrets are included in configuration validation messages.
-
-## Migration from generated-document sources
-
-This pre-release contract replaces `source: "generate"` with `source: "temporary"`, or preferably omits `source`. `generate` remains a DAG node kind, not a retrieval source. There are no `generate` or `scratch` source aliases. Python callers use `TemporaryDocumentSource` instead of `GenerateDocumentSource`.
-
-Signing entries now use `{"document": {"id": "<input UUID>"}, "out": "<output UUID>"}` rather than `{"in": "<input UUID>", "out": "<output UUID>"}`. Existing stored artifact bytes and keys do not change.
-
-Update queued DAG payloads, caller examples, and profile input constraints before deploying the new workers. Publish new immutable flow-profile versions rather than editing old fingerprints. The repository's development profile advances to `development-standard@2`; the old lock entry remains as history, while version 1 is retired from the active configuration.

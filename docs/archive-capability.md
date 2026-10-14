@@ -138,7 +138,7 @@ Each workflow representation contains:
 
 | Field | Behavior |
 |---|---|
-| `source` | Required generic document-source object. Supported source kinds are `temporary`, `archive`, `render`, and `bundle`. |
+| `source` | Required generic document-source object. Supported source kinds are (at the time of writing) `temporary`, `archive`, `render`, and `bundle`. |
 | `representation_id` | UUID, required explicitly when a workflow snapshot has several representations. |
 | `name` | Optional nonblank name, used as the download filename. The receiving service rejects control characters. |
 | `metadata` | Explicit representation-level JSON object; defaults to `{}`. |
