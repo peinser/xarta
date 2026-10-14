@@ -7,6 +7,26 @@ Asynchronous document workflow service. Clients submit a document flow as a DAG,
 
 Write this code for human maintainers, not for minimum line count.
 
+## API contracts
+
+- The versioned OpenAPI contracts live in `contracts/openapi/`; start with its
+  `README.md`. `contracts/openapi/v1/openapi.json` describes HTTP API v1 and all
+  workflow capabilities accepted by intake.
+- Every code change that changes a contract must update the corresponding OpenAPI
+  contract in the same change. This includes routes, request/response fields,
+  validation, capability outcomes, status codes, headers, media types,
+  authentication, callbacks, pagination, and idempotency behavior. Document the
+  implemented behavior, including deployment-dependent requirements.
+- Reuse executable DAG/render schemas: run
+  `uv run --frozen python tools/openapi_contract.py --update-schemas` when those
+  definitions change, then review and update HTTP semantics manually.
+- Bump the contract's `info.version` appropriately and record compatibility notes
+  in its `CHANGELOG.md`. Follow the pre-release/released versioning policy in
+  `contracts/openapi/README.md`; flow-profile versions remain independently immutable.
+- Run `make contracts-check` before considering a contract change complete; it is
+  also part of `make verify`. Keep operation IDs stable unless intentionally
+  changing the client-facing contract.
+
 ## Safety
 
 - Before the first published release, remove or replace obsolete APIs, schemas,

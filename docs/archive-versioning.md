@@ -1,5 +1,8 @@
 # Archive Versioning
 
+For the end-to-end usage guide, configuration reference, and operational guidance,
+see [Archive capability](archive-capability.md).
+
 Archive stores logical documents in named archives. Each logical document has a mutable
 `HEAD` pointer to one immutable version snapshot. A snapshot owns immutable version
 metadata and one or more immutable representations; each representation owns its content

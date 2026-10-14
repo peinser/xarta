@@ -9,7 +9,7 @@ DEV_CERTIFICATE_DIR ?= .dev/runtime/certificates
 
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
-.PHONY: help install lock format format-check lint typecheck test security profiles-check verify \
+.PHONY: help install lock format format-check lint typecheck test security profiles-check contracts-check verify \
 	docker-build docker-validate helm-verify setup dev mcp services-check credentials-check certificates \
 	db-create-archive db-deploy streams wallets archive-test telemetry-check scenario-bundle scenario-archive-representations scenario-generate-sign-archive \
 	scenario-signature-xarta-dev-seal-v1 scenario-signature-pades-b-b-v1 scenario-signature-pades-b-t-v1 scenario-preview \
@@ -47,7 +47,10 @@ security: ## Run source security checks
 profiles-check: ## Validate immutable repository flow-profile versions
 	$(UV) run --frozen python -m xarta.flow_profiles validate-lock examples/configuration/flow-profiles.json examples/configuration/flow-profile-lock.json
 
-verify: lint typecheck test security profiles-check ## Run all local Python quality gates
+contracts-check: ## Check OpenAPI route coverage and executable schemas
+	$(UV) run --frozen python tools/openapi_contract.py
+
+verify: lint typecheck test security profiles-check contracts-check ## Run all local Python quality gates
 
 docker-build: ## Build the production image
 	$(DOCKER) build --target production -t $(IMAGE_REPO):$(IMAGE_TAG) -f docker/core/Dockerfile .

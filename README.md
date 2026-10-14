@@ -34,6 +34,10 @@ the business inputs a caller is allowed to provide.
 Capabilities are deployment-specific. An intake service advertises only the node kinds
 its workers can actually execute.
 
+The [versioned OpenAPI contracts](contracts/openapi/README.md) describe the HTTP APIs,
+workflow-node inputs and outcomes, callbacks, and postal-station operations. Start with
+[`contracts/openapi/v1/openapi.json`](contracts/openapi/v1/openapi.json).
+
 ## How It Works
 
 1. A client submits a complete DAG or typed inputs for an exact flow-profile version.
