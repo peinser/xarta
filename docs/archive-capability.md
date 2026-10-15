@@ -221,28 +221,43 @@ particular deployment's document-type registry.
 
 ```json
 {
-  "document_id": "10000000-0000-0000-0000-000000000001",
-  "version_id": "30000000-0000-0000-0000-000000000001",
-  "created": "2026-10-14T12:00:00+00:00",
-  "expires": "2036-10-14T12:00:00+00:00",
-  "metadata": {"customer": "123", "invoice_number": "INV-001"},
-  "default_representation_id": "40000000-0000-0000-0000-000000000001",
-  "representations": [
-    {
-      "representation_id": "40000000-0000-0000-0000-000000000001",
-      "name": "invoice.pdf",
-      "content_type": "application/pdf",
-      "metadata": {"purpose": "human-readable"},
-      "field": "pdf"
-    },
-    {
-      "representation_id": "40000000-0000-0000-0000-000000000002",
-      "name": "invoice.xml",
-      "content_type": "application/xml",
-      "metadata": {"purpose": "machine-readable"},
-      "field": "xml"
-    }
-  ]
+  "id": "10000000-0000-0000-0000-000000000001",
+  "version": {
+    "id": "30000000-0000-0000-0000-000000000001"
+  },
+  "created_at": "2026-10-14T12:00:00+00:00",
+  "expires_at": "2036-10-14T12:00:00+00:00",
+  "metadata": {
+    "customer": "123",
+    "invoice_number": "INV-001"
+  },
+  "representations": {
+    "default": "40000000-0000-0000-0000-000000000001",
+    "items": [
+      {
+        "id": "40000000-0000-0000-0000-000000000001",
+        "field": "pdf",
+        "name": "invoice.pdf",
+        "metadata": {
+          "purpose": "human-readable"
+        },
+        "content": {
+          "type": "application/pdf"
+        }
+      },
+      {
+        "id": "40000000-0000-0000-0000-000000000002",
+        "field": "xml",
+        "name": "invoice.xml",
+        "metadata": {
+          "purpose": "machine-readable"
+        },
+        "content": {
+          "type": "application/xml"
+        }
+      }
+    ]
+  }
 }
 ```
 
@@ -260,12 +275,19 @@ curl --fail-with-body --request PUT \
 The `<manifest.json` form syntax sends the manifest as a text field, while `@`
 sends a file upload. Adjust the origin to the deployed service or gateway.
 
-HTTP representations use `field` and `content_type` instead of a workflow `source`.
+HTTP representations use `field` and `content.type` instead of a workflow `source`.
 Upload fields and representation IDs must be unique within the snapshot. A single
 representation can omit its identity and the default identity. For multiple
 representations, supply explicit identities and the default identity, as above.
 The HTTP parser can derive omitted representation IDs, but the workflow parser
 requires them explicitly for multi-representation snapshots.
+
+HTTP manifests identify documents with `id`, snapshots with `version: {id, parent}`,
+and representations with `representations: {default, items}`. Each upload item has
+an optional `id`, optional `name`/`metadata`, a required multipart `field`, and
+`content: {type}`. The service computes checksums and sizes; clients cannot submit
+those properties or content availability. Unknown fields are rejected, including
+obsolete flat identity fields. Metadata maps remain free-form.
 
 ### Responses
 
@@ -275,15 +297,50 @@ requires them explicitly for multi-representation snapshots.
 | `200` | Equivalent current snapshot (`unchanged`) or exact replay. |
 | `400` | Invalid manifest or fields, such as missing uploads or invalid timestamps. |
 | `404` | Unknown destination archive. |
-| `409` | Conflict, with an `outcome` and explanatory `error`. |
+| `409` | Conflict, with `error.code` and explanatory `error.message`. |
 
-A successful response includes `archive`, `document_id`, resolved `version_id`,
-`outcome`, `default_representation_id`, `representations`, and `replayed`.
-Representation details include the service-computed checksum and byte size.
+A successful response contains only `archive`, logical document `id`, resolved
+`version`, and `outcome`:
+
+```json
+{
+  "archive": "default",
+  "id": "10000000-0000-0000-0000-000000000001",
+  "version": {
+    "id": "30000000-0000-0000-0000-000000000001",
+    "parent": null
+  },
+  "outcome": "created"
+}
+```
+
+The version is an object with `id` and `parent`; `parent` is the preceding version
+UUID or `null` for the first snapshot. It describes the stored version, including
+when an equivalent snapshot is returned instead of the requested new version.
+Use the details or representations endpoint for generated representation IDs,
+metadata, server-computed checksums, and byte sizes.
+An exact retry returns the original operation's outcome and identities with HTTP
+`200`; it does not create another version or expose an internal replay flag.
 
 HTTP conflicts include `overwrite_rejected`, `version_conflict`,
 `deletion_in_progress`, and `document_deleted`. The outbound workflow adapter
 normalizes the latter two to its supported `version_conflict` outcome.
+
+Errors from matched archive routes use a consistent JSON envelope, for example:
+
+```json
+{
+  "error": {
+    "code": "version_conflict",
+    "message": "parent version does not match HEAD"
+  }
+}
+```
+
+Validation, missing resources, retention failures, and unexpected errors likewise
+use `error.code`/`error.message`. Gateway failures or errors before a route is
+matched are outside this handler. HTTP `300` selection ambiguity additionally
+returns `representation_ids`, an array of UUID references rather than objects.
 
 The archive routes do not enforce application-level authentication themselves.
 Access controls are deployment-dependent, such as gateway, ingress, and network
@@ -300,20 +357,21 @@ To change metadata, expiration, bytes, names, or representation membership, subm
 a complete new version.
 
 The service locks the logical document while checking and advancing `HEAD`.
-Whenever `parent_version_id` is supplied, it must match current `HEAD`, even when
+Whenever HTTP `version.parent` (`parent_version_id` in a workflow node) is supplied,
+it must match current `HEAD`, even when
 the archive does not require a predecessor. With
 `require_current_predecessor: true`, every update must supply it. This check occurs
 before equivalent-snapshot detection: an unchanged submission with a stale or
 missing required parent can still conflict.
 
-To update the example document, use a new `version_id` and idempotency key, include
-all representations, and set `parent_version_id` to the current version ID. On a
+To update the example HTTP document, use a new `version.id` and idempotency key,
+include all representations, and set `version.parent` to the current version ID. On a
 conflict, retrieve `HEAD` again and decide whether the intended update is still
 valid. When a predecessor is optional and omitted, the stored parent is still the
 actual previous `HEAD`.
 
 `HEAD` is the latest accepted version, not necessarily the version with the latest
-caller-supplied `created` timestamp.
+caller-supplied `created_at` timestamp.
 
 ### Write and history policies
 
@@ -358,14 +416,14 @@ These are separate decisions:
 
 Consequently, a new requested version ID does not by itself force a new version.
 When content is unchanged, use the returned version ID rather than assuming the
-requested one was stored. Changing `created` alone also does not force a new
+requested one was stored. Changing `created_at` alone also does not force a new
 version, although a retention default derived from that timestamp can change
-`expires` and therefore the snapshot fingerprint.
+`expires_at` and therefore the snapshot fingerprint.
 
 HTTP idempotency keys are scoped to an archive. When supplying `Idempotency-Key`,
-the manifest must include a stable `created`. Omitted HTTP document and version
+the manifest must include a stable `created_at`. Omitted HTTP document and version
 IDs derive deterministically from the archive, key, and document identity. Without
-a supplied key, the service generates a fresh key and defaults `created` to now;
+a supplied key, the service generates a fresh key and defaults `created_at` to now;
 clients should not rely on that mode for retryable creation.
 
 The workflow adapter sends
@@ -406,12 +464,23 @@ routes without `/archives/{archive}` address `default`.
 | `GET` | `/documents/{document_id}/versions/{version_id}/representations/{representation_id}` | Exact representation bytes |
 | `DELETE` | `/documents/{document_id}` | Aggregate deletion request |
 
-Version detail objects use **`id`** for the document UUID; write responses and
-collection envelopes use **`document_id`**. Details also contain `archive`,
-`version_id`, `parent_version_id`, `created`, `expires`, `document_type`, `metadata`,
-`state`, `default_representation_id`, and `representations`. Representation checksums
-are objects shaped as `{"sha512": "<hex digest>"}`. Storage paths, bucket names,
+Details, write responses, and collection envelopes use **`id`** for the logical
+document UUID. Details, representation collections, and write responses group
+snapshot identity as **`version: {"id": "<version UUID>", "parent": null}`**;
+`parent` is the preceding version UUID when one exists, not an embedded object.
+Details also contain `archive`, `created_at`, `expires_at`, `document_type`,
+`metadata`, `content_availability`, and `representations: {default, items}`.
+Each representation has `id`, `name`, `metadata`, and
+`content: {type, size_bytes, checksum, availability}`. The checksum is an object
+with a `sha512` hexadecimal digest. Storage paths, bucket names,
 backend identities, and credentials are not exposed.
+
+`content.availability` is `available` while that representation's bytes are
+recorded as retained, or `metadata-only` after removal. It is not workflow progress,
+a live storage-health check, or an expiry check. The snapshot's aggregate
+`content_availability` remains `available` while **any** representation retains
+bytes; the default may already be metadata-only during cleanup. Sizes and checksums
+continue to describe the original bytes after removal.
 
 ### Content negotiation and integrity
 
@@ -440,20 +509,28 @@ implement conditional `304` responses or byte-range downloads.
 GET /api/v1/archive/archives/default/documents/{document_id}/versions?limit=50
 ```
 
-The response includes `archive`, `document_id`, `head_version_id`, `items`, and
-`next_cursor`. Pass a non-null `next_cursor` back as `cursor` to get the next page.
+The response includes `archive`, `id`, `head_version_id`, `items`, and
+`pagination: {limit, next}`. Pass a non-null `pagination.next` unchanged as the
+next request's `cursor` query parameter. It is an opaque token, not a URL or a page
+number. `next: null` ends traversal. `pagination.limit` is the effective maximum
+batch size, not the number of items returned, including on an empty final batch.
+Each item uses the same nested `version` shape as a details response.
 The default limit is 50; the allowed range is 1–100. Cursors are opaque and bound
 to the archive/document collection; malformed or cross-resource cursors are
 rejected.
 
-Ordering is `(created DESC, version_id DESC)`. Use `head_version_id` to identify
+Ordering is `(created_at DESC, version.id DESC)`. Use `head_version_id` to identify
 current `HEAD`, rather than assuming the first history item is current. A cursor
 does not freeze the collection while concurrent writes occur.
 
 ### Using archived content in another capability
 
-Generic document sources use `version` and `representation`, rather than the write
-fields `version_id` and `representation_id`:
+HTTP manifests use the nested identity and representation shapes described above.
+The executable workflow-node protocol still uses `document_id`, `version_id`,
+`parent_version_id`, `created`, `expires`, `default_representation_id`, and a list
+of source-backed representations; the HTTP adapter maps those inputs to the upload
+manifest. Generic document source references use scalar `version` and
+`representation` UUIDs (the HTTP response's nested `version` is not a source reference):
 
 ```json
 {
@@ -480,9 +557,11 @@ check for every archive source.
 
 ### Expiration
 
-An explicit `expires` must be later than `created`. If a document type is supplied,
+An explicit HTTP `expires_at` must be later than `created_at`. Both timestamps
+include a timezone. `created_at` is caller-supplied snapshot creation time, not
+necessarily the service ingestion time. If a document type is supplied,
 the receiver looks it up; when expiration is omitted and the type has
-`default_retention`, expiration becomes `created + default_retention`.
+`default_retention`, expiration becomes `created_at + default_retention`.
 Without either an explicit expiration or such a default, expiration remains null.
 
 Expiration makes a document eligible for safe aggregate deletion. It is not an

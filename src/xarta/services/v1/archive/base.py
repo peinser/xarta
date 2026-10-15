@@ -5,13 +5,18 @@ Base blueprint definition of the v1 archive API.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 from sanic import Blueprint
+from sanic import response
+from sanic.exceptions import SanicException
+from sanic.log import error_logger
 
 from xarta import cache
 from xarta import env
 from xarta.adapters import AdapterRegistry
+from xarta.exceptions.protocol import ArchiveDocumentNotFound
 from xarta.protocol.document.archive import ARCHIVE_SERVICE_ENDPOINT
 from xarta.protocol.document.archive import ARCHIVE_SERVICE_TIMEOUT
 from xarta.tracking import DestinationRegistry
@@ -26,6 +31,8 @@ from .storage import ArchiveStorageSessions
 if TYPE_CHECKING:
     from typing import Final
 
+    from sanic import HTTPResponse
+    from sanic import Request
     from sanic import Sanic
 
 
@@ -33,6 +40,39 @@ bp = Blueprint(
     name="archive-v1",
     url_prefix="/api/v1/archive",
 )
+
+
+def archive_error(
+    status: int,
+    code: str,
+    message: str,
+    *,
+    representation_ids: list[str] | None = None,
+    headers: dict[str, str] | None = None,
+) -> HTTPResponse:
+    payload = {"error": {"code": code, "message": message}}
+    if representation_ids is not None:
+        payload["representation_ids"] = representation_ids
+    return response.json(payload, status=status, headers=headers)
+
+
+@bp.exception(Exception)
+async def archive_exception(_request: Request, exception: Exception) -> HTTPResponse:
+    if isinstance(exception, SanicException):
+        return archive_error(
+            exception.status_code,
+            HTTPStatus(exception.status_code).name.lower(),
+            (
+                "Archived document or representation was not found."
+                if isinstance(exception, ArchiveDocumentNotFound)
+                else str(exception)
+            ),
+            headers=exception.headers,
+        )
+    error_logger.error("Archive request failed", exc_info=exception)
+    return archive_error(
+        500, "internal_server_error", "An unexpected archive error occurred."
+    )
 
 
 env.verify(

@@ -128,9 +128,24 @@ async def create_awaited_version(
     session: aiohttp.ClientSession, ids: dict[str, str]
 ) -> None:
     form = aiohttp.FormData()
-    form.add_field("content-type", "application/octet-stream")
-    form.add_field("document-id", ids["awaited_document"])
-    form.add_field("version-id", ids["awaited_version"])
+    form.add_field(
+        "manifest",
+        json.dumps(
+            {
+                "id": ids["awaited_document"],
+                "version": {"id": ids["awaited_version"]},
+                "representations": {
+                    "items": [
+                        {
+                            "field": "file",
+                            "content": {"type": "application/octet-stream"},
+                        }
+                    ]
+                },
+            }
+        ),
+        content_type="application/json",
+    )
     form.add_field(
         "file",
         b"awaited archive version\n",

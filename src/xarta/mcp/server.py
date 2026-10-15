@@ -383,25 +383,27 @@ def create_mcp_server(configuration: MCPConfiguration) -> MCPServer[MCPDependenc
             return CallToolResult(content=[], structured_content=result)
 
         details = dict(result["body"])
-        resolved_version = details.get("version_id")
-        default_representation_id = details.get("default_representation_id")
-        representations = details.get("representations", [])
+        version = details.get("version")
+        resolved_version = version.get("id") if isinstance(version, dict) else None
+        representations = details.get("representations", {})
+        default_representation_id = representations.get("default")
         default_representation = next(
             (
                 item
-                for item in representations
-                if item.get("representation_id") == default_representation_id
+                for item in representations.get("items", [])
+                if item.get("id") == default_representation_id
             ),
             None,
         )
-        size = (
-            default_representation.get("size")
+        content_properties = (
+            default_representation.get("content", {})
             if isinstance(default_representation, dict)
-            else None
+            else {}
         )
+        size = content_properties.get("size_bytes")
         if (
             isinstance(default_representation, dict)
-            and default_representation.get("state") == "available"
+            and content_properties.get("availability") == "available"
             and isinstance(size, int)
             and resolved_version
         ):
@@ -413,7 +415,7 @@ def create_mcp_server(configuration: MCPConfiguration) -> MCPServer[MCPDependenc
                 )
                 details["resource"] = {
                     "uri": uri,
-                    "mime_type": default_representation["content_type"],
+                    "mime_type": content_properties["type"],
                     "size": size,
                 }
                 result["body"] = details
@@ -426,7 +428,7 @@ def create_mcp_server(configuration: MCPConfiguration) -> MCPServer[MCPDependenc
                                 "Immutable archived document content; use the tool metadata "
                                 "for its verified content type"
                             ),
-                            mime_type=default_representation["content_type"],
+                            mime_type=content_properties["type"],
                             size=size,
                         )
                     ],
@@ -503,16 +505,17 @@ def create_mcp_server(configuration: MCPConfiguration) -> MCPServer[MCPDependenc
         representation = next(
             (
                 item
-                for item in details.get("representations", [])
-                if item.get("representation_id") == str(parsed_representation_id)
+                for item in details.get("representations", {}).get("items", [])
+                if item.get("id") == str(parsed_representation_id)
             ),
             None,
         )
         if not isinstance(representation, dict):
             raise ResourceNotFoundError("Archived representation was not found")
-        if representation.get("state") != "available":
+        content_properties = representation.get("content", {})
+        if content_properties.get("availability") != "available":
             raise ResourceError("Archived document content is unavailable")
-        size = representation.get("size")
+        size = content_properties.get("size_bytes")
         if not isinstance(size, int) or size > configuration.archive_max_resource_bytes:
             raise ResourceError("Archived document exceeds the MCP resource size limit")
 
@@ -528,7 +531,7 @@ def create_mcp_server(configuration: MCPConfiguration) -> MCPServer[MCPDependenc
             raise ResourceError("Archived document content is unavailable")
         if len(content) != size:
             raise ResourceError("Archived document size does not match its metadata")
-        checksum = (representation.get("checksum") or {}).get("sha512")
+        checksum = (content_properties.get("checksum") or {}).get("sha512")
         if (
             not isinstance(checksum, str)
             or hashlib.sha512(content).hexdigest() != checksum
@@ -536,7 +539,7 @@ def create_mcp_server(configuration: MCPConfiguration) -> MCPServer[MCPDependenc
             raise ResourceError(
                 "Archived document checksum does not match its metadata"
             )
-        declared_content_type = representation.get("content_type")
+        declared_content_type = content_properties.get("type")
         if (
             isinstance(declared_content_type, str)
             and content_type

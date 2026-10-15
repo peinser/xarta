@@ -83,6 +83,7 @@ class VersionResult:
     archive: str
     document_id: UUID
     version_id: UUID
+    parent_version_id: UUID | None
     outcome: str
     default_representation_id: UUID
     representations: tuple[dict[str, Any], ...]
@@ -91,12 +92,14 @@ class VersionResult:
     def dict(self) -> dict[str, Any]:
         return {
             "archive": self.archive,
-            "document_id": str(self.document_id),
-            "version_id": str(self.version_id),
+            "id": str(self.document_id),
+            "version": {
+                "id": str(self.version_id),
+                "parent": (
+                    str(self.parent_version_id) if self.parent_version_id else None
+                ),
+            },
             "outcome": self.outcome,
-            "default_representation_id": str(self.default_representation_id),
-            "representations": list(self.representations),
-            "replayed": self.replayed,
         }
 
 
@@ -242,9 +245,12 @@ class ArchivePostgresModel(SanicPostgresModel):
         cls, connection: Connection, write: VersionWrite
     ) -> VersionResult | None:
         row = await connection.fetchrow(
-            "SELECT replay.request_fingerprint, replay.response "
+            "SELECT replay.request_fingerprint, replay.response, parent.version_id AS parent_version_id "
             "FROM archive_idempotency replay JOIN archive_documents aggregate "
             "ON aggregate._id = replay.aggregate_id "
+            "JOIN archive_document_versions version ON version.aggregate_id = aggregate._id "
+            "AND version.version_id = (replay.response->>'version_id')::uuid "
+            "LEFT JOIN archive_document_versions parent ON parent._id = version.parent_version_id "
             "WHERE replay.archive = $1 AND replay.idempotency_key = $2 "
             "AND aggregate.lifecycle = 'active'",
             write.archive,
@@ -252,9 +258,12 @@ class ArchivePostgresModel(SanicPostgresModel):
         )
         if row is None:
             row = await connection.fetchrow(
-                "SELECT replay.request_fingerprint, replay.response "
+                "SELECT replay.request_fingerprint, replay.response, parent.version_id AS parent_version_id "
                 "FROM archive_idempotency replay JOIN archive_documents aggregate "
                 "ON aggregate._id = replay.aggregate_id "
+                "JOIN archive_document_versions version ON version.aggregate_id = aggregate._id "
+                "AND version.version_id = (replay.response->>'version_id')::uuid "
+                "LEFT JOIN archive_document_versions parent ON parent._id = version.parent_version_id "
                 "WHERE aggregate.archive = $1 AND aggregate.document_id = $2 "
                 "AND replay.requested_version_id = $3 AND aggregate.lifecycle = 'active'",
                 write.archive,
@@ -273,6 +282,7 @@ class ArchivePostgresModel(SanicPostgresModel):
             archive=write.archive,
             document_id=write.document_id,
             version_id=UUID(payload["version_id"]),
+            parent_version_id=row["parent_version_id"],
             outcome=payload["outcome"],
             default_representation_id=UUID(payload["default_representation_id"]),
             representations=tuple(payload["representations"]),
@@ -522,6 +532,7 @@ class ArchivePostgresModel(SanicPostgresModel):
                 write.archive,
                 write.document_id,
                 head_public_id,
+                details.parent_version_id,
                 "unchanged",
                 details.default_representation_id,
                 details.representations,
@@ -593,6 +604,7 @@ class ArchivePostgresModel(SanicPostgresModel):
             write.archive,
             write.document_id,
             write.version_id,
+            head_public_id,
             "version_created" if head_public_id else "created",
             write.default_representation_id,
             tuple(item.public_dict() for item in write.representations),
@@ -615,7 +627,7 @@ class ArchivePostgresModel(SanicPostgresModel):
         cls, connection: Connection, aggregate_id: int, version_id: UUID
     ) -> VersionResult:
         row = await connection.fetchrow(
-            "SELECT version.default_representation_id, "
+            "SELECT version.default_representation_id, parent.version_id AS parent_version_id, "
             "jsonb_agg(jsonb_build_object('representation_id', representation.representation_id, "
             "'name', representation.name, 'content_type', representation.content_type, "
             "'metadata', representation.metadata, 'checksum', jsonb_build_object('sha512', "
@@ -623,8 +635,9 @@ class ArchivePostgresModel(SanicPostgresModel):
             "'state', representation.state) ORDER BY representation._id) AS representations "
             "FROM archive_document_versions version JOIN archive_document_representations representation "
             "ON representation.version_internal_id = version._id "
+            "LEFT JOIN archive_document_versions parent ON parent._id = version.parent_version_id "
             "WHERE version.aggregate_id = $1 AND version.version_id = $2 "
-            "GROUP BY version._id",
+            "GROUP BY version._id, parent.version_id",
             aggregate_id,
             version_id,
         )
@@ -632,6 +645,7 @@ class ArchivePostgresModel(SanicPostgresModel):
             archive="",
             document_id=UUID(int=0),
             version_id=version_id,
+            parent_version_id=row["parent_version_id"],
             outcome="unchanged",
             default_representation_id=row["default_representation_id"],
             representations=tuple(cls._json(row["representations"])),
@@ -644,6 +658,16 @@ class ArchivePostgresModel(SanicPostgresModel):
         write: VersionWrite,
         result: VersionResult,
     ) -> None:
+        # Persist the internal result independently of the public response shape.
+        # Existing replay records use these same keys; ancestry comes from the stored version.
+        payload = {
+            "archive": result.archive,
+            "document_id": str(result.document_id),
+            "version_id": str(result.version_id),
+            "outcome": result.outcome,
+            "default_representation_id": str(result.default_representation_id),
+            "representations": list(result.representations),
+        }
         await connection.execute(
             "INSERT INTO archive_idempotency (archive, aggregate_id, idempotency_key, "
             "requested_version_id, request_fingerprint, response) VALUES ($1, $2, $3, $4, $5, $6)",
@@ -652,7 +676,7 @@ class ArchivePostgresModel(SanicPostgresModel):
             write.idempotency_key,
             write.version_id,
             write.fingerprint,
-            orjson.dumps(result.dict()).decode(),
+            orjson.dumps(payload).decode(),
         )
 
     @classmethod

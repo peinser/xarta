@@ -30,6 +30,7 @@ def test_archive_version_round_trip_keeps_representation_metadata_separate() -> 
     document = ArchiveDocumentVersion(
         identifier=uuid4(),
         version_id=uuid4(),
+        parent_version_id=uuid4(),
         default_representation_id=representation_id,
         metadata={"invoice": "2026-0042"},
         representations=(
@@ -43,10 +44,31 @@ def test_archive_version_round_trip_keeps_representation_metadata_separate() -> 
         ),
     )
 
-    restored = ArchiveDocumentVersion.fromdict(document.dict())
+    serialized = document.dict()
+    assert serialized["version"] == {
+        "id": str(document.version_id),
+        "parent": str(document.parent_version_id),
+    }
+    assert "version_id" not in serialized
+    assert "parent_version_id" not in serialized
+    assert serialized["representations"]["default"] == str(representation_id)
+    item = serialized["representations"]["items"][0]
+    assert item["id"] == str(representation_id)
+    assert item["content"] == {
+        "type": "application/pdf",
+        "checksum": {"sha512": "ab" * 64},
+        "size_bytes": 10,
+        "availability": "available",
+    }
+    assert serialized["content_availability"] == "available"
+    assert serialized["created_at"] == document.created.isoformat()
+    assert serialized["expires_at"] is None
+    restored = ArchiveDocumentVersion.fromdict(serialized)
 
     assert restored.document_type is None
     assert restored.identifier == document.identifier
+    assert restored.version_id == document.version_id
+    assert restored.parent_version_id == document.parent_version_id
     assert restored.default_representation.metadata == {"generator": "renderer"}
     assert restored.metadata == {"invoice": "2026-0042"}
 

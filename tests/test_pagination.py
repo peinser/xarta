@@ -10,9 +10,13 @@ from xarta.http.pagination import parse_limit
 
 
 def test_page_serializes_items_and_cursor() -> None:
-    assert Page((1, 2), "next").dict(str) == {
+    assert Page((1, 2), "next", limit=50).dict(str) == {
         "items": ["1", "2"],
-        "next_cursor": "next",
+        "pagination": {"limit": 50, "next": "next"},
+    }
+    assert Page((), None, limit=50).dict(str) == {
+        "items": [],
+        "pagination": {"limit": 50, "next": None},
     }
 
 

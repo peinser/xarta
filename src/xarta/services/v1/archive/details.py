@@ -111,11 +111,13 @@ async def _retrieve_versions(
         next_cursor = _encode_version_cursor(
             archive, document_id, last.created, last.version_id
         )
-    representation = Page(page.items, next_cursor).dict(lambda version: version.dict())
+    representation = Page(page.items, next_cursor, limit=limit).dict(
+        lambda version: version.dict()
+    )
     return response.json(
         {
             "archive": archive,
-            "document_id": str(document_id),
+            "id": str(document_id),
             "head_version_id": str(page.head_version_id),
             **representation,
         }
@@ -148,10 +150,19 @@ async def _retrieve_representations(
     return response.json(
         {
             "archive": archive,
-            "document_id": str(document_id),
-            "version_id": str(version.version_id),
-            "default_representation_id": str(version.default_representation_id),
-            "representations": [item.dict() for item in version.representations],
+            "id": str(document_id),
+            "version": {
+                "id": str(version.version_id),
+                "parent": (
+                    str(version.parent_version_id)
+                    if version.parent_version_id
+                    else None
+                ),
+            },
+            "representations": {
+                "default": str(version.default_representation_id),
+                "items": [item.dict() for item in version.representations],
+            },
         }
     )
 

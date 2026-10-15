@@ -33,25 +33,27 @@ class ArchiveRepresentation:
 
     def dict(self) -> dict[str, Any]:
         return {
-            "representation_id": str(self.representation_id),
+            "id": str(self.representation_id),
             "name": self.name,
-            "content_type": self.content_type,
             "metadata": self.metadata,
-            "checksum": {"sha512": self.checksum} if self.checksum else None,
-            "size": self.size,
-            "state": self.state,
+            "content": {
+                "type": self.content_type,
+                "checksum": {"sha512": self.checksum} if self.checksum else None,
+                "size_bytes": self.size,
+                "availability": self.state,
+            },
         }
 
     @staticmethod
     def fromdict(representation: Mapping[str, Any]) -> ArchiveRepresentation:
         return ArchiveRepresentation(
-            representation_id=UUID(representation["representation_id"]),
+            representation_id=UUID(representation["id"]),
             name=representation.get("name"),
-            content_type=representation["content_type"],
+            content_type=representation["content"]["type"],
             metadata=representation.get("metadata", {}),
-            checksum=(representation.get("checksum") or {}).get("sha512"),
-            size=representation.get("size"),
-            state=representation.get("state", "available"),
+            checksum=(representation["content"]["checksum"] or {}).get("sha512"),
+            size=representation["content"]["size_bytes"],
+            state=representation["content"]["availability"],
         )
 
 
@@ -88,29 +90,33 @@ class ArchiveDocumentVersion:
         return {
             "id": str(self.identifier),
             "archive": self.archive,
-            "version_id": str(self.version_id),
-            "parent_version_id": (
-                str(self.parent_version_id) if self.parent_version_id else None
-            ),
+            "version": {
+                "id": str(self.version_id),
+                "parent": (
+                    str(self.parent_version_id) if self.parent_version_id else None
+                ),
+            },
             "document_type": self.document_type.value if self.document_type else None,
             "metadata": self.metadata,
-            "created": self.created.isoformat(),
-            "expires": self.expires.isoformat() if self.expires else None,
-            "state": self.state,
-            "default_representation_id": str(self.default_representation_id),
-            "representations": [item.dict() for item in self.representations],
+            "created_at": self.created.isoformat(),
+            "expires_at": self.expires.isoformat() if self.expires else None,
+            "content_availability": self.state,
+            "representations": {
+                "default": str(self.default_representation_id),
+                "items": [item.dict() for item in self.representations],
+            },
         }
 
     @staticmethod
     def fromdict(representation: Mapping[str, Any]) -> ArchiveDocumentVersion:
-        expires = representation.get("expires")
+        expires = representation.get("expires_at")
         return ArchiveDocumentVersion(
             identifier=UUID(representation["id"]),
             archive=representation.get("archive", "default"),
-            version_id=UUID(representation["version_id"]),
+            version_id=UUID(representation["version"]["id"]),
             parent_version_id=(
-                UUID(representation["parent_version_id"])
-                if representation.get("parent_version_id")
+                UUID(representation["version"]["parent"])
+                if representation["version"]["parent"]
                 else None
             ),
             document_type=(
@@ -119,12 +125,14 @@ class ArchiveDocumentVersion:
                 else None
             ),
             metadata=representation.get("metadata", {}),
-            created=datetime.datetime.fromisoformat(representation["created"]),
+            created=datetime.datetime.fromisoformat(representation["created_at"]),
             expires=datetime.datetime.fromisoformat(expires) if expires else None,
-            state=representation.get("state", "available"),
-            default_representation_id=UUID(representation["default_representation_id"]),
+            state=representation["content_availability"],
+            default_representation_id=UUID(
+                representation["representations"]["default"]
+            ),
             representations=tuple(
                 ArchiveRepresentation.fromdict(item)
-                for item in representation["representations"]
+                for item in representation["representations"]["items"]
             ),
         )

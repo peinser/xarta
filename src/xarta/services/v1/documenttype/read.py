@@ -93,7 +93,7 @@ async def list_document_types(request: Request) -> HTTPResponse:
             DOCUMENT_TYPE_CURSOR_SCOPE,
             {"identifier": items[-1].identifier.value},
         )
-    return response.json(Page(items, next_cursor).dict(_summary))
+    return response.json(Page(items, next_cursor, limit=limit).dict(_summary))
 
 
 @bp.route("/<identifier:str>", methods=["GET"])

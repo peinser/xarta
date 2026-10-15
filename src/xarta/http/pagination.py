@@ -23,15 +23,16 @@ class PaginationError(ValueError):
 
 @dataclass(frozen=True)
 class Page(Generic[T]):
-    """The stable public representation of one cursor-paginated page."""
+    """A bounded result batch with cursor continuation metadata."""
 
     items: tuple[T, ...]
     next_cursor: str | None
+    limit: int
 
     def dict(self, serialize: Callable[[T], Any]) -> dict[str, Any]:
         return {
             "items": [serialize(item) for item in self.items],
-            "next_cursor": self.next_cursor,
+            "pagination": {"limit": self.limit, "next": self.next_cursor},
         }
 
 

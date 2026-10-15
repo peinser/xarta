@@ -57,15 +57,40 @@ Write this code for human maintainers, not for minimum line count.
   embedded objects explicitly: `version.parent` is a UUID or null, not a recursive
   version object. Document intentional differences between creation inputs,
   references, and resolved responses rather than making callers guess.
+- Use one field name for the same concept at each resource scope: for example,
+  `availability` for both a version and a representation's content. Explain aggregate
+  versus individual semantics in descriptions rather than introducing competing
+  names such as `content_availability`. Prefer concise relationship names when the
+  context is unambiguous: `head` in a version collection, `parent` in version
+  identity, and `default` in a representation collection. These are scalar UUID
+  references unless explicitly documented otherwise.
 - Make ownership and semantics clear: document/version metadata and representation
   metadata are distinct; content availability is distinct from workflow progress.
+  Reserve `lifecycle` for resource transitions such as active/deleting/deleted;
+  byte retention (available/metadata-only) is `availability`, not that lifecycle.
   Use specific names for states and timestamps, and document their scope and units.
 - Prefer concise write acknowledgements containing the outcome and resolved
   resource identities. If returning a resource instead, return its consistent,
   documented representation; avoid arbitrary partial snapshots that mix an
   acknowledgement with selected detail fields. Expose internal replay, deduplication,
   or storage bookkeeping only when callers have a concrete need for it.
-- Reuse established collection/pagination and error shapes. Separate stable
+- Use cursor/keyset traversal only, never page-number or offset-based pagination.
+  Use indexed seek predicates with a deterministic order and a unique tie-breaker;
+  do not scan and discard preceding results with `OFFSET`. Keep cursors opaque and
+  bound to their collection and relevant filters/order. Enforce bounded batch sizes;
+  fetch at most `limit + 1` result items when needed to determine continuation.
+  Do not calculate total counts or total pages as part of normal collection reads.
+- Make cursor continuation explicit: collections use `items` for results and
+  `pagination: {limit, next}` for paging metadata. `limit` is the effective
+  maximum batch size, not the number of returned items; `next` is an opaque
+  continuation token or null when no further results exist. Pass a non-null
+  `pagination.next` unchanged as the next request's `cursor` parameter; it is not
+  a URL or a page number. Apply the same envelope
+  across paginated endpoints rather than putting paging fields beside resource
+  fields. Prefer `pagination` over a generic `query` wrapper for this purpose;
+  query criteria and pagination are different concepts. Do not add total counts or
+  redundant continuation flags without a concrete caller requirement.
+- Reuse established error shapes. Separate stable
   machine-readable error codes from human-readable messages; do not overload one
   field with resource objects in one response and bare IDs in another.
 - Apply these preferences to new or explicitly revised contracts. Trace all

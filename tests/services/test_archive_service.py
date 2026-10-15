@@ -134,8 +134,8 @@ async def test_xarta_http_adapter_constructs_archive_request() -> None:
         async def read(self):
             return orjson.dumps(
                 {
-                    "document_id": str(archived_document.id),
-                    "version_id": str(version_id),
+                    "id": str(archived_document.id),
+                    "version": {"id": str(version_id), "parent": None},
                     "outcome": "created",
                 }
             )
@@ -175,23 +175,24 @@ async def test_xarta_http_adapter_constructs_archive_request() -> None:
     manifest = orjson.loads(fields.pop("manifest"))
     assert fields == {"representation-0": b"pdf"}
     assert manifest == {
-        "document_id": str(archived_document.id),
-        "version_id": str(version_id),
-        "parent_version_id": None,
-        "created": archived_document.created.isoformat(),
-        "expires": expire.isoformat(),
+        "id": str(archived_document.id),
+        "version": {"id": str(version_id), "parent": None},
+        "created_at": archived_document.created.isoformat(),
+        "expires_at": expire.isoformat(),
         "document_type": "invoice",
         "metadata": {"customer": "123"},
-        "default_representation_id": str(item.default_representation_id),
-        "representations": [
-            {
-                "representation_id": str(item.default_representation_id),
-                "name": None,
-                "content_type": "application/pdf",
-                "metadata": {},
-                "field": "representation-0",
-            }
-        ],
+        "representations": {
+            "default": str(item.default_representation_id),
+            "items": [
+                {
+                    "id": str(item.default_representation_id),
+                    "name": None,
+                    "content": {"type": "application/pdf"},
+                    "metadata": {},
+                    "field": "representation-0",
+                }
+            ],
+        },
     }
     assert "destination" not in fields
     assert submission == ArchiveSubmission(
@@ -280,7 +281,7 @@ async def test_xarta_http_adapter_maps_semantic_conflicts() -> None:
 
         async def read(self):
             return orjson.dumps(
-                {"outcome": "version_conflict", "error": "stale predecessor"}
+                {"error": {"code": "version_conflict", "message": "stale predecessor"}}
             )
 
         async def __aenter__(self):
@@ -338,8 +339,8 @@ async def test_xarta_http_adapter_accepts_resolved_version_for_unchanged() -> No
         async def read(self):
             return orjson.dumps(
                 {
-                    "document_id": str(archived_document.id),
-                    "version_id": str(current_version_id),
+                    "id": str(archived_document.id),
+                    "version": {"id": str(current_version_id), "parent": None},
                     "outcome": "unchanged",
                 }
             )

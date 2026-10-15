@@ -68,28 +68,34 @@ def _manifest(version: ArchiveVersionSubmission) -> tuple[dict[str, Any], list[s
     ]
     return (
         {
-            "document_id": str(version.document_id),
-            "version_id": str(version.version_id),
-            "parent_version_id": (
-                str(version.parent_version_id) if version.parent_version_id else None
-            ),
-            "created": version.created.isoformat(),
-            "expires": version.expires.isoformat() if version.expires else None,
+            "id": str(version.document_id),
+            "version": {
+                "id": str(version.version_id),
+                "parent": (
+                    str(version.parent_version_id)
+                    if version.parent_version_id
+                    else None
+                ),
+            },
+            "created_at": version.created.isoformat(),
+            "expires_at": version.expires.isoformat() if version.expires else None,
             "document_type": version.document_type,
             "metadata": version.metadata,
-            "default_representation_id": str(version.default_representation_id),
-            "representations": [
-                {
-                    "representation_id": str(representation.representation_id),
-                    "name": representation.name,
-                    "content_type": representation.content_type,
-                    "metadata": representation.metadata,
-                    "field": field,
-                }
-                for representation, field in zip(
-                    version.representations, fields, strict=True
-                )
-            ],
+            "representations": {
+                "default": str(version.default_representation_id),
+                "items": [
+                    {
+                        "id": str(representation.representation_id),
+                        "name": representation.name,
+                        "content": {"type": representation.content_type},
+                        "metadata": representation.metadata,
+                        "field": field,
+                    }
+                    for representation, field in zip(
+                        version.representations, fields, strict=True
+                    )
+                ],
+            },
         },
         fields,
     )
@@ -114,15 +120,13 @@ def _multipart(version: ArchiveVersionSubmission) -> aiohttp.FormData:
 
 
 def _success_result(payload: Any, version: ArchiveVersionSubmission) -> dict[str, str]:
-    if not isinstance(payload, dict) or payload.get("document_id") != str(
-        version.document_id
-    ):
+    if not isinstance(payload, dict) or payload.get("id") != str(version.document_id):
         raise ValueError("Archive response contains an invalid identifier")
     outcome = payload.get("outcome")
     if outcome not in {"created", "version_created", "unchanged"}:
         raise ValueError("Archive response contains an invalid outcome")
     try:
-        resolved_version_id = str(UUID(payload["version_id"]))
+        resolved_version_id = str(UUID(payload["version"]["id"]))
     except (KeyError, TypeError, ValueError) as ex:
         raise ValueError("Archive response contains an invalid identifier") from ex
     if outcome in {"created", "version_created"} and resolved_version_id != str(
@@ -180,7 +184,10 @@ class XartaHTTPArchiveAdapter:
                 conflict = orjson.loads(body)
             except orjson.JSONDecodeError:
                 conflict = {}
-            outcome = conflict.get("outcome", "version_conflict")
+            error = conflict.get("error", {}) if isinstance(conflict, dict) else {}
+            if not isinstance(error, dict):
+                error = {}
+            outcome = error.get("code", "version_conflict")
             if outcome not in {"overwrite_rejected", "version_conflict"}:
                 outcome = "version_conflict"
             result = {
@@ -190,7 +197,7 @@ class XartaHTTPArchiveAdapter:
             }
             return result, {
                 **result,
-                "error": str(conflict.get("error", "Archive rejected the version")),
+                "error": str(error.get("message", "Archive rejected the version")),
             }
         if response.status not in {200, 201}:
             raise HTTPClientError(endpoint=self.endpoint, status=response.status)

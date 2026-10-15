@@ -55,7 +55,7 @@ The principal scenarios are:
 | Existing document with delivery/failure branches | `EmailExistingDocument`, `PreparedInvoice` |
 | Repository's exact profile and typed inputs | `ExactProfileWorkflow`, `ExactProfileInputs`, `FlowProfile` |
 | Upload source bytes with a flow file | `MultipartFlowDefinition` plus the `submitFlow` upload command |
-| PDF and UBL archive representations, versions and replay | `ArchiveSnapshotManifest`, `ArchiveVersion`, `ArchiveReplayed` |
+| PDF and UBL archive representations, versions and replay | `ArchiveSnapshotManifest`, `ArchiveVersion`, `ArchiveChildVersion`, `ArchiveReplayed` |
 | Transform and multipart webhook variants | `TransformMerge`, `TransformSplit`, `WebhookMultipart` and the node schema examples |
 | ZIP job queued, processing or failed | `BundleQueued`, `BundleProcessing`, `BundleMissingSource` |
 | Render-envelope validation | `DocumentCheckValid`, `DocumentCheckInvalid` |
@@ -65,6 +65,19 @@ The principal scenarios are:
 | Doccle provisioning and account linking | `EnsureReceiver`, `ReceiverPending`, `DoccleLinked`, `DoccleUnlinked` |
 | Postal claim, package receipt, printing, scanning and handover | `PostalRunClaimed`, `PostalRunReplayed`, `PostalProductionRun`, `PostalPrintUncertain`, `PostalHandoverScan` |
 | SEPA structured/unstructured remittance | `SepaStructuredPayment`, `SepaInvoicePayment` |
+
+Archive responses use `id` for the logical document and `version: {id, parent}`
+for the returned snapshot. The parent is a UUID or `null`; it is not an embedded
+version object. Version-list items share this shape, and their collection envelope
+retains `head_version_id` to identify the current head. HTTP input manifests use
+the same identity shape. Read responses group `representations: {default, items}`;
+each item has `id`, `name`, `metadata`, and
+`content: {type, size_bytes, checksum, availability}`. Upload items supply only
+`content.type` plus a multipart `field`, not server-owned checksum/availability data.
+Write responses acknowledge only the outcome and document/version identities.
+HTTP timestamps are `created_at` and `expires_at`; errors use `error: {code, message}`
+with explicit `representation_ids` for ambiguous selections. Executable DAG inputs
+retain their distinct source-backed schema; the worker adapter translates to HTTP.
 
 Related examples reuse synthetic invoice `INV-2026-0042`, customer `CUST-0042`,
 and stable UUIDs. Their document type `invoice`, Jinja template, destinations,
@@ -91,6 +104,32 @@ fabricated payload; empty job details or empty discovery results denote real emp
 states rather than undocumented fields.
 
 ## Editing and verification
+
+### Cursor-based collection responses
+
+Archive version collections and document-type collections use `items` plus
+`pagination: {limit, next}`. `limit` is the effective maximum batch size (1–100,
+default 50), even when fewer items are returned. `next` is an opaque token, not a
+URL or page number. Pass it unchanged as the next request's `cursor` query
+parameter, preserving the collection and query criteria. A null `next` ends
+traversal; omit `cursor` to start again. The implementation uses indexed keyset
+queries and at most `limit + 1` result items, without offsets or total counts.
+
+```json
+{
+  "items": [],
+  "pagination": {
+    "limit": 50,
+    "next": null
+  }
+}
+```
+
+This is an actual empty-result shape. Archive collections additionally identify
+the document, archive, and current head. For nonempty continuation examples, see
+`DocumentTypesFirstPage` and `ArchiveVersionsFirstPage` in the contract.
+
+### Maintaining the contract
 
 1. Trace the handler, parser, serializer, and callers. Update the contract in the
    same change as routes, fields, validation, outcomes, authentication, media types,

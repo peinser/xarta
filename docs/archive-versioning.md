@@ -28,7 +28,7 @@ archive_document_representations
 
 archive_idempotency
 + archive + idempotency_key (unique)
-+ requested_version_id, request_fingerprint, exact response
++ requested_version_id, request_fingerprint, recorded write result
 ```
 
 Composite foreign keys ensure that `HEAD` belongs to its document, a parent belongs to the
@@ -45,23 +45,31 @@ and lifecycle may change. The archive schema is the independent Sqitch project u
 
 ```json
 {
-  "document_id": "00000000-0000-0000-0000-000000000001",
-  "version_id": "00000000-0000-0000-0000-000000000003",
-  "parent_version_id": "00000000-0000-0000-0000-000000000002",
-  "created": "2030-01-01T00:00:00+00:00",
-  "expires": null,
+  "id": "00000000-0000-0000-0000-000000000001",
+  "version": {
+    "id": "00000000-0000-0000-0000-000000000003",
+    "parent": "00000000-0000-0000-0000-000000000002"
+  },
+  "created_at": "2030-01-01T00:00:00+00:00",
+  "expires_at": null,
   "document_type": "invoice",
-  "metadata": {"customer": "123"},
-  "default_representation_id": "00000000-0000-0000-0000-000000000101",
-  "representations": [
-    {
-      "representation_id": "00000000-0000-0000-0000-000000000101",
-      "name": "original",
-      "content_type": "application/pdf",
-      "metadata": {},
-      "field": "representation-0"
-    }
-  ]
+  "metadata": {
+    "customer": "123"
+  },
+  "representations": {
+    "default": "00000000-0000-0000-0000-000000000101",
+    "items": [
+      {
+        "id": "00000000-0000-0000-0000-000000000101",
+        "field": "representation-0",
+        "name": "original",
+        "metadata": {},
+        "content": {
+          "type": "application/pdf"
+        }
+      }
+    ]
+  }
 }
 ```
 
@@ -121,9 +129,37 @@ default when `Accept` does not select one. Responses include a representation-sp
 ETag, safe `Content-Disposition`, `X-Content-Type-Options: nosniff`, and `Vary: Accept` for
 negotiated downloads. Stored SHA-512 and size are verified before content is returned.
 
-Version listing is ordered by `(created DESC, version_id DESC)` and uses opaque,
+Version listing is ordered by `(created_at DESC, version.id DESC)` and uses opaque,
 resource-bound keyset cursors. `limit` defaults to 50 and must be between 1 and 100. The
 response reports `head_version_id` separately from `items`.
+Cursor metadata is grouped as `pagination: {limit, next}`: `limit` is the effective
+maximum batch size; `next` is an opaque continuation token or null at the end.
+Pass `pagination.next` unchanged as the next request's `cursor` query parameter.
+There are no page numbers, offsets, or total-count queries.
+
+Details, write results, and collection envelopes identify the logical document as
+`id`. A snapshot's identity is grouped as `version: {"id": "<version UUID>",
+"parent": null}`; a subsequent snapshot uses its preceding version UUID as
+`version.parent`. Version-list items and representation collections use that same
+shape. Write acknowledgements contain only `archive`, `id`, `version`, and `outcome`.
+HTTP manifests use the same identity shape; an input `version.parent` checks the
+expected HEAD, whereas a returned parent describes the stored version's ancestry.
+
+Details and representation collections group selection as
+`representations: {default, items}`. Each representation uses `id`, `name`, `metadata`,
+and `content: {type, size_bytes, checksum, availability}`. `available` means bytes
+are recorded as retained; `metadata-only` means only descriptive records remain.
+Snapshot `content_availability` aggregates the representation states and becomes
+`metadata-only` only when no representation retains bytes.
+
+HTTP timestamps are `created_at` and `expires_at`. Creation can be caller-supplied;
+expiry is a retention boundary, not deletion completion. The upload manifest
+accepts `content.type` and a multipart `field` for each item; output checksum,
+size, and availability are computed by the service and cannot be submitted.
+Unknown manifest fields are rejected. HTTP errors use
+`error: {code, message}`; ambiguous selection adds `representation_ids`.
+Executable workflow-node inputs retain their source-backed schema; the archive
+adapter translates it to the HTTP manifest.
 
 ## Policies
 
@@ -141,7 +177,8 @@ Policies are selected by the destination archive; request fields cannot override
 | `retain-metadata` | retained | removed; representation becomes `metadata-only` |
 | `latest-only` | retained as an immutable audit snapshot | removed; representation becomes `metadata-only` |
 
-`require_current_predecessor` compares `parent_version_id` with locked `HEAD`.
+`require_current_predecessor` compares the supplied HTTP `version.parent`
+(`parent_version_id` in workflow nodes) with locked `HEAD`.
 `duplicate_unchanged: false` creates a version even when the complete snapshot fingerprint
 matches. Backend revisions are immutable configuration identities and must remain configured
 while their representations exist.
@@ -149,7 +186,7 @@ while their representations exist.
 ## Concurrency And Failure Semantics
 
 Aggregate row locking serializes `HEAD` advancement. Exact idempotency replay returns the
-recorded response; reuse of an idempotency key or requested version with different semantics
+recorded write result in the current response format; reuse of an idempotency key or requested version with different semantics
 returns `version_conflict`. Representation objects are written conditionally before SQL
 commit. SQL failure rolls them back; a retry may adopt an identical orphan but never
 overwrite different bytes.

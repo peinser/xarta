@@ -17,6 +17,7 @@ from xarta.exceptions.http import BadRequestError
 from xarta.exceptions.http import InternalServerError
 from xarta.protocol.document.archive import ArchiveDocumentVersion
 from xarta.protocol.document.archive import ArchiveRepresentation
+from xarta.services.v1.archive.base import archive_exception
 from xarta.services.v1.archive.base import bp
 from xarta.services.v1.archive.db import ArchivePostgresModel
 from xarta.services.v1.archive.db import StorageReference
@@ -119,26 +120,28 @@ async def test_manifest_parses_separate_version_and_representation_metadata() ->
     xml_id = uuid4()
     request = snapshot_request(
         {
-            "document_id": str(document_id),
-            "version_id": str(version_id),
-            "created": "2030-01-01T00:00:00+00:00",
+            "id": str(document_id),
+            "version": {"id": str(version_id)},
+            "created_at": "2030-01-01T00:00:00+00:00",
             "metadata": {"invoice_number": "2026-0042"},
-            "default_representation_id": str(pdf_id),
-            "representations": [
-                {
-                    "representation_id": str(xml_id),
-                    "field": "xml",
-                    "content_type": "application/xml",
-                    "metadata": {"schema_version": "2.1"},
-                },
-                {
-                    "representation_id": str(pdf_id),
-                    "field": "pdf",
-                    "content_type": "application/pdf",
-                    "name": "invoice.pdf",
-                    "metadata": {"generator": "renderer"},
-                },
-            ],
+            "representations": {
+                "default": str(pdf_id),
+                "items": [
+                    {
+                        "id": str(xml_id),
+                        "field": "xml",
+                        "content": {"type": "application/xml"},
+                        "metadata": {"schema_version": "2.1"},
+                    },
+                    {
+                        "id": str(pdf_id),
+                        "field": "pdf",
+                        "content": {"type": "application/pdf"},
+                        "name": "invoice.pdf",
+                        "metadata": {"generator": "renderer"},
+                    },
+                ],
+            },
         },
         {"pdf": b"pdf", "xml": b"xml"},
     )
@@ -165,14 +168,16 @@ async def test_manifest_requires_explicit_default_for_multiple_representations()
 ):
     request = snapshot_request(
         {
-            "representations": [
-                {"field": "one", "content_type": "application/pdf"},
-                {"field": "two", "content_type": "application/xml"},
-            ]
+            "representations": {
+                "items": [
+                    {"field": "one", "content": {"type": "application/pdf"}},
+                    {"field": "two", "content": {"type": "application/xml"}},
+                ]
+            }
         },
         {"one": b"one", "two": b"two"},
     )
-    with pytest.raises(BadRequestError, match="default_representation_id"):
+    with pytest.raises(BadRequestError, match="representations.default"):
         await _parse_snapshot(request, "default")
 
 
@@ -181,19 +186,27 @@ async def test_manifest_requires_explicit_default_for_multiple_representations()
     ("change", "message"),
     [
         ({"name": "   "}, "name"),
-        ({"content_type": "pdf"}, "content_type"),
+        ({"content": {"type": "pdf"}}, "content.type"),
+        ({"content": {"type": "application/pdf", "size_bytes": 10}}, "Unsupported"),
+        ({"representation_id": "ignored-legacy-id"}, "Unsupported"),
+        ({"id": False}, "UUID string"),
         ({"metadata": []}, "JSON object"),
         ({"field": "missing"}, "missing multipart field"),
     ],
 )
 async def test_manifest_rejects_invalid_representation_fields(change, message) -> None:
-    specification = {"field": "content", "content_type": "application/pdf"}
+    specification = {"field": "content", "content": {"type": "application/pdf"}}
     specification.update(change)
     request = snapshot_request(
-        {"representations": [specification]}, {"content": b"pdf"}
+        {"representations": {"items": [specification]}}, {"content": b"pdf"}
     )
-    with pytest.raises(BadRequestError, match=message):
+    with pytest.raises(BadRequestError, match=message) as raised:
         await _parse_snapshot(request, "default")
+    error = await archive_exception(request, raised.value)
+    assert error.status == 400
+    assert orjson.loads(error.body) == {
+        "error": {"code": "bad_request", "message": str(raised.value)}
+    }
 
 
 @pytest.mark.asyncio
@@ -218,7 +231,9 @@ async def test_version_collection_exposes_head_and_cursor(monkeypatch) -> None:
 
     assert payload["head_version_id"] == str(head_id)
     assert "current_version_id" not in payload
-    assert _decode_cursor(payload["next_cursor"], "payroll", document_id) == (
+    assert payload["pagination"]["limit"] == 1
+    assert "next_cursor" not in payload
+    assert _decode_cursor(payload["pagination"]["next"], "payroll", document_id) == (
         created,
         head_id,
     )
@@ -343,6 +358,12 @@ async def test_negotiated_download_returns_406(monkeypatch) -> None:
     )
     assert result.status == 406
     assert result.headers["vary"] == "Accept"
+    assert orjson.loads(result.body) == {
+        "error": {
+            "code": "not_acceptable",
+            "message": "requested content type is not available",
+        }
+    }
 
 
 @pytest.mark.asyncio

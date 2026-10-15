@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import orjson
 import pytest
 
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
@@ -50,11 +51,13 @@ class Connection:
         self,
         *,
         head_id=None,
+        head_parent_id=None,
         snapshot_fingerprint=None,
         lifecycle="active",
         commit_error: Exception | None = None,
     ) -> None:
         self.head_id = head_id
+        self.head_parent_id = head_parent_id
         self.snapshot_fingerprint = snapshot_fingerprint
         self.lifecycle = lifecycle
         self.commit_error = commit_error
@@ -81,6 +84,7 @@ class Connection:
         if "jsonb_agg" in query:
             return {
                 "default_representation_id": self.default_representation_id,
+                "parent_version_id": self.head_parent_id,
                 "representations": [
                     item.public_dict() for item in self.representations
                 ],
@@ -172,6 +176,9 @@ async def test_complete_snapshot_persists_every_representation_before_sealing(
     )
 
     assert result.outcome == "created"
+    assert set(result.dict()) == {"archive", "id", "version", "outcome"}
+    assert result.dict()["id"] == str(candidate.document_id)
+    assert result.dict()["version"] == {"id": str(candidate.version_id), "parent": None}
     assert persisted == [item.representation_id for item in candidate.representations]
     queries = [query for query, _ in connection.executed]
     representation_inserts = [
@@ -310,9 +317,12 @@ async def test_unchanged_snapshot_ignores_new_identity_and_skips_storage(
     monkeypatch,
 ) -> None:
     head = uuid4()
+    parent = uuid4()
     candidate = write(snapshot_fingerprint=b"same" * 16)
     connection = Connection(
-        head_id=head, snapshot_fingerprint=candidate.snapshot_fingerprint
+        head_id=head,
+        head_parent_id=parent,
+        snapshot_fingerprint=candidate.snapshot_fingerprint,
     )
     connection.default_representation_id = candidate.default_representation_id
     connection.representations = candidate.representations
@@ -324,7 +334,24 @@ async def test_unchanged_snapshot_ignores_new_identity_and_skips_storage(
     )
     assert result.outcome == "unchanged"
     assert result.version_id == head
+    assert result.dict()["version"] == {"id": str(head), "parent": str(parent)}
     persist.assert_not_awaited()
+
+    recorded = next(
+        arguments[-1]
+        for query, arguments in connection.executed
+        if "INSERT INTO archive_idempotency" in query
+    )
+    replay_connection = AsyncMock()
+    replay_connection.fetchrow.return_value = {
+        "request_fingerprint": candidate.fingerprint,
+        "response": orjson.loads(recorded),
+        "parent_version_id": parent,
+    }
+    replay = await ArchivePostgresModel._replay(replay_connection, candidate)
+    assert replay is not None and replay.replayed
+    assert replay.dict() == result.dict()
+    assert "replayed" not in replay.dict()
 
 
 @pytest.mark.asyncio

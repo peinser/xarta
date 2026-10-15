@@ -3,7 +3,7 @@
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "info": {
     "title": "Xarta HTTP and Workflow Capabilities API",
-    "version": "1.0.1",
+    "version": "5.0.0",
     "summary": "Contracts for all implemented Xarta v1 HTTP services and intake workflow nodes.",
     "description": "The union of independently deployable services. A deployment may expose only a subset; discover enabled workflow kinds at /api/v1/intake/capabilities. HTTP acceptance does not imply workflow completion. Canonical API paths are version-pinned; x-path-alias records the floating /api alias. Security requirements describe service-level enforcement only; ingress authorization is deployment-specific. NATS and MCP are separate protocols, not REST operations. See contracts/openapi/README.md for versioning and maintenance. Named examples use synthetic invoice/customer identities and reserved example domains. Unless explicitly tied to repository configuration or vendored UBL fixtures, destinations, templates, policies, provider references, timestamps, hashes and credentials are illustrative. Binary uploads/downloads use file-oriented x-codeSamples rather than fake JSON bytes. See contracts/openapi/README.md for the example scenarios and prerequisites.",
     "license": {
@@ -1440,17 +1440,14 @@
                         "$ref": "#/components/schemas/DocumentTypeSummary"
                       }
                     },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                    "pagination": {
+                      "$ref": "#/components/schemas/CursorPagination"
                     }
                   },
                   "additionalProperties": true,
                   "required": [
                     "items",
-                    "next_cursor"
+                    "pagination"
                   ]
                 },
                 "examples": {
@@ -1459,6 +1456,9 @@
                   },
                   "DocumentTypesLastPage": {
                     "$ref": "#/components/examples/DocumentTypesLastPage"
+                  },
+                  "DocumentTypesEmpty": {
+                    "$ref": "#/components/examples/DocumentTypesEmpty"
                   }
                 }
               }
@@ -1524,7 +1524,8 @@
               "maximum": 100,
               "default": 50
             },
-            "example": 1
+            "example": 1,
+            "description": "Maximum batch size (1–100, default 50). The response repeats the effective value in pagination.limit even when fewer items are returned. This is not a page number or offset."
           },
           {
             "name": "cursor",
@@ -1533,10 +1534,11 @@
             "schema": {
               "type": "string"
             },
-            "description": "Opaque cursor returned by this exact collection; omit on the first request.",
+            "description": "Opaque token returned in pagination.next by this exact collection. Omit for the first batch; pass each subsequent token unchanged (using normal URL query encoding). A token is not a URL or page number. Tokens from another collection are invalid.",
             "example": "eyJzY29wZSI6ImRvY3VtZW50LXR5cGVzIiwidmFsdWVzIjp7ImlkZW50aWZpZXIiOiJpbnZvaWNlIn0sInZlcnNpb24iOjF9"
           }
-        ]
+        ],
+        "description": " Returns items and pagination: {limit, next}. This is cursor/keyset traversal only. On the first request omit cursor; then pass each non-null pagination.next unchanged as cursor for this same collection. A null next ends traversal. limit is the effective maximum batch size, not the returned item count. No offsets or total-count queries are performed."
       }
     },
     "/api/v1/document-type/{identifier}": {
@@ -1695,70 +1697,108 @@
             }
           },
           "400": {
-            "description": "Invalid request. Raised framework errors may use JSON, HTML or plain text according to Sanic negotiation.",
+            "description": "Invalid request.",
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/Error"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SanicError"
-                    }
-                  ]
+                  "$ref": "#/components/schemas/ArchiveError"
                 },
                 "examples": {
                   "MissingArchiveManifest": {
-                    "$ref": "#/components/examples/MissingArchiveManifest"
-                  }
-                }
-              },
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                },
-                "examples": {
-                  "frameworkHtml": {
-                    "summary": "HTML error representation (abridged)",
-                    "description": "Illustrative HTML error content; Sanic controls the complete page markup.",
-                    "value": "<!doctype html><html><head><title>Bad Request</title></head><body><h1>Bad Request</h1><p>A JSON flow definition is required.</p></body></html>"
-                  }
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                },
-                "examples": {
-                  "frameworkText": {
-                    "summary": "Plain-text error representation",
-                    "value": "400 — Bad Request\nA JSON flow definition is required."
+                    "summary": "A snapshot manifest is required.",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "A snapshot manifest is required."
+                      }
+                    }
                   }
                 }
               }
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "'Unknown archive: missing'"
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "'Unknown archive: missing'"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "409": {
             "description": "Snapshot identity or version conflict",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ArchiveError"
                 },
                 "examples": {
                   "ArchiveConflict": {
-                    "$ref": "#/components/examples/ArchiveConflict"
+                    "summary": "A version identity was reused for different content",
+                    "value": {
+                      "error": {
+                        "code": "version_conflict",
+                        "message": "Version identity already exists"
+                      }
+                    }
                   }
                 }
               }
             }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -1778,7 +1818,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Reuse for the identical snapshot; explicitly supply manifest.created to make retries stable.",
+            "description": "Reuse for the identical snapshot; explicitly supply manifest.created_at to make retries stable.",
             "example": "invoice-2026-0042-snapshot-v1"
           }
         ],
@@ -1796,7 +1836,7 @@
                       "$ref": "#/components/schemas/ArchiveManifest"
                     },
                     "examples": [
-                      "{\"document_id\": \"c3be90e0-24ab-5d38-a39d-3149db97ae22\", \"version_id\": \"6518eb3c-c1eb-5f49-a1bf-67c91308e31e\", \"created\": \"2026-10-14T09:30:00+00:00\", \"expires\": \"2036-10-14T09:30:00+00:00\", \"document_type\": \"invoice\", \"metadata\": {\"invoice_number\": \"INV-2026-0042\", \"customer_id\": \"CUST-0042\", \"department\": \"accounts-receivable\", \"fiscal_year\": 2026}, \"default_representation_id\": \"a5f2a8ae-6f5d-59f8-bcff-51e359176286\", \"representations\": [{\"field\": \"invoice_pdf\", \"representation_id\": \"a5f2a8ae-6f5d-59f8-bcff-51e359176286\", \"name\": \"INV-2026-0042.pdf\", \"content_type\": \"application/pdf\", \"metadata\": {\"role\": \"human-readable\", \"language\": \"nl-BE\"}}, {\"field\": \"invoice_xml\", \"representation_id\": \"e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5\", \"name\": \"INV-2026-0042.xml\", \"content_type\": \"application/xml\", \"metadata\": {\"role\": \"structured-invoice\", \"standard\": \"UBL-2.1\"}}]}"
+                      "{\"id\": \"c3be90e0-24ab-5d38-a39d-3149db97ae22\", \"version\": {\"id\": \"6518eb3c-c1eb-5f49-a1bf-67c91308e31e\"}, \"created_at\": \"2026-10-14T09:30:00+00:00\", \"expires_at\": \"2036-10-14T09:30:00+00:00\", \"document_type\": \"invoice\", \"metadata\": {\"invoice_number\": \"INV-2026-0042\", \"customer_id\": \"CUST-0042\", \"department\": \"accounts-receivable\", \"fiscal_year\": 2026}, \"representations\": {\"default\": \"a5f2a8ae-6f5d-59f8-bcff-51e359176286\", \"items\": [{\"id\": \"a5f2a8ae-6f5d-59f8-bcff-51e359176286\", \"field\": \"invoice_pdf\", \"name\": \"INV-2026-0042.pdf\", \"metadata\": {\"role\": \"human-readable\", \"language\": \"nl-BE\"}, \"content\": {\"type\": \"application/pdf\"}}, {\"id\": \"e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5\", \"field\": \"invoice_xml\", \"name\": \"INV-2026-0042.xml\", \"metadata\": {\"role\": \"structured-invoice\", \"standard\": \"UBL-2.1\"}, \"content\": {\"type\": \"application/xml\"}}]}}"
                     ]
                   }
                 },
@@ -1810,7 +1850,7 @@
               }
             }
           },
-          "description": "manifest is a JSON-encoded form string, not an uploaded file. Other parts are binary files named by manifest.representations[].field."
+          "description": "manifest is a JSON-encoded form string, not an uploaded file. Other parts are binary files named by manifest.representations.items[].field."
         },
         "description": "Unscoped routes use archive=default. Returns 201 for a newly created document/version, 200 for replay or an existing equivalent snapshot. Different content under a reused identity conflicts.",
         "x-codeSamples": [
@@ -1873,40 +1913,99 @@
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "300": {
             "description": "Multiple equally ranked representations; select an exact representation URL.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    },
-                    "representations": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "format": "uuid"
-                      }
-                    }
-                  },
-                  "additionalProperties": true,
-                  "required": [
-                    "error",
-                    "representations"
-                  ]
+                  "$ref": "#/components/schemas/ArchiveError"
                 },
                 "examples": {
                   "ArchiveAmbiguous": {
-                    "$ref": "#/components/examples/ArchiveAmbiguous"
+                    "summary": "Two equally ranked PDF representations",
+                    "description": "For a version containing two non-default PDFs, choose an exact representation URL.",
+                    "value": {
+                      "error": {
+                        "code": "ambiguous_representation",
+                        "message": "representation selection is ambiguous"
+                      },
+                      "representation_ids": [
+                        "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                        "b826ed5a-77b0-5e66-b82b-cc64bd647096"
+                      ]
+                    }
                   }
                 }
+              }
+            },
+            "headers": {
+              "Vary": {
+                "description": "Representation selection depends on Accept.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "Accept"
               }
             }
           },
@@ -1915,13 +2014,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ArchiveError"
                 },
                 "examples": {
                   "ArchiveNotAcceptable": {
-                    "$ref": "#/components/examples/ArchiveNotAcceptable"
+                    "summary": "The requested media type is not stored",
+                    "value": {
+                      "error": {
+                        "code": "not_acceptable",
+                        "message": "requested content type is not available"
+                      }
+                    }
                   }
                 }
+              }
+            },
+            "headers": {
+              "Vary": {
+                "description": "Representation selection depends on Accept.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "Accept"
               }
             }
           }
@@ -1970,16 +2084,87 @@
             "description": "Successful response"
           },
           "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "A JSON flow definition is required."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "A JSON flow definition is required."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Retention or archive policy forbids deletion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "retentionProtected": {
+                    "summary": "Safe deletion before expiry is forbidden",
+                    "value": {
+                      "error": {
+                        "code": "forbidden",
+                        "message": "Cannot safely delete documents that are not expired."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -2010,11 +2195,11 @@
               "type": "string",
               "default": "true"
             },
-            "description": "Case-insensitive true/1/yes or false/0/no. Safe deletion respects retention; false requests unsafe deletion subject to archive policy.",
+            "description": "Case-insensitive true/1/yes or false/0/no. Defaults to true. Safe deletion rejects documents with no expiry or an expiry in the future; false bypasses the retention check.",
             "example": "true"
           }
         ],
-        "description": "Empty 202 when deletion is accepted; empty 200 when no new deletion is needed. Deletion is asynchronous."
+        "description": "Empty 202 when deletion is accepted; empty 200 if the document does not exist or is already deleted. Safe deletion checks the current version expiry; safe=false bypasses that check. Removal of bytes is asynchronous."
       }
     },
     "/api/v1/archive/archives/{archive}/documents/{document_id}/versions/{version_id}": {
@@ -2068,40 +2253,99 @@
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "300": {
             "description": "Multiple equally ranked representations; select an exact representation URL.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    },
-                    "representations": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "format": "uuid"
-                      }
-                    }
-                  },
-                  "additionalProperties": true,
-                  "required": [
-                    "error",
-                    "representations"
-                  ]
+                  "$ref": "#/components/schemas/ArchiveError"
                 },
                 "examples": {
                   "ArchiveAmbiguous": {
-                    "$ref": "#/components/examples/ArchiveAmbiguous"
+                    "summary": "Two equally ranked PDF representations",
+                    "description": "For a version containing two non-default PDFs, choose an exact representation URL.",
+                    "value": {
+                      "error": {
+                        "code": "ambiguous_representation",
+                        "message": "representation selection is ambiguous"
+                      },
+                      "representation_ids": [
+                        "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                        "b826ed5a-77b0-5e66-b82b-cc64bd647096"
+                      ]
+                    }
                   }
                 }
+              }
+            },
+            "headers": {
+              "Vary": {
+                "description": "Representation selection depends on Accept.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "Accept"
               }
             }
           },
@@ -2110,13 +2354,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ArchiveError"
                 },
                 "examples": {
                   "ArchiveNotAcceptable": {
-                    "$ref": "#/components/examples/ArchiveNotAcceptable"
+                    "summary": "The requested media type is not stored",
+                    "value": {
+                      "error": {
+                        "code": "not_acceptable",
+                        "message": "requested content type is not available"
+                      }
+                    }
                   }
                 }
+              }
+            },
+            "headers": {
+              "Vary": {
+                "description": "Representation selection depends on Accept.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "Accept"
               }
             }
           }
@@ -2213,10 +2472,66 @@
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -2289,16 +2604,78 @@
                 "examples": {
                   "ArchiveVersion": {
                     "$ref": "#/components/examples/ArchiveVersion"
+                  },
+                  "ArchiveChildVersion": {
+                    "$ref": "#/components/examples/ArchiveChildVersion"
+                  },
+                  "ArchiveMetadataOnlyVersion": {
+                    "$ref": "#/components/examples/ArchiveMetadataOnlyVersion"
                   }
                 }
               }
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -2349,10 +2726,66 @@
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -2397,16 +2830,78 @@
                 "examples": {
                   "ArchiveVersion": {
                     "$ref": "#/components/examples/ArchiveVersion"
+                  },
+                  "ArchiveChildVersion": {
+                    "$ref": "#/components/examples/ArchiveChildVersion"
+                  },
+                  "ArchiveMetadataOnlyVersion": {
+                    "$ref": "#/components/examples/ArchiveMetadataOnlyVersion"
                   }
                 }
               }
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -2467,10 +2962,66 @@
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -2528,61 +3079,96 @@
                   },
                   "ArchiveVersionsLastPage": {
                     "$ref": "#/components/examples/ArchiveVersionsLastPage"
+                  },
+                  "ArchiveVersionsExhausted": {
+                    "$ref": "#/components/examples/ArchiveVersionsExhausted"
                   }
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid request. Raised framework errors may use JSON, HTML or plain text according to Sanic negotiation.",
+            "description": "Invalid request.",
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/Error"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SanicError"
-                    }
-                  ]
+                  "$ref": "#/components/schemas/ArchiveError"
                 },
                 "examples": {
                   "InvalidPaginationCursor": {
-                    "$ref": "#/components/examples/InvalidPaginationCursor"
-                  }
-                }
-              },
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                },
-                "examples": {
-                  "frameworkHtml": {
-                    "summary": "HTML error representation (abridged)",
-                    "description": "Illustrative HTML error content; Sanic controls the complete page markup.",
-                    "value": "<!doctype html><html><head><title>Bad Request</title></head><body><h1>Bad Request</h1><p>A JSON flow definition is required.</p></body></html>"
-                  }
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                },
-                "examples": {
-                  "frameworkText": {
-                    "summary": "Plain-text error representation",
-                    "value": "400 — Bad Request\nA JSON flow definition is required."
+                    "summary": "cursor is invalid",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "cursor is invalid"
+                      }
+                    }
                   }
                 }
               }
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -2615,7 +3201,8 @@
               "maximum": 100,
               "default": 50
             },
-            "example": 1
+            "example": 1,
+            "description": "Maximum batch size (1–100, default 50). The response repeats the effective value in pagination.limit even when fewer items are returned. This is not a page number or offset."
           },
           {
             "name": "cursor",
@@ -2624,11 +3211,11 @@
             "schema": {
               "type": "string"
             },
-            "description": "Opaque cursor returned by this exact collection; omit on the first request.",
+            "description": "Opaque token returned in pagination.next by this exact collection. Omit for the first batch; pass each subsequent token unchanged (using normal URL query encoding). A token is not a URL or page number. Tokens from another collection are invalid.",
             "example": "eyJzY29wZSI6ImFyY2hpdmU6ZGVmYXVsdDpkb2N1bWVudDpjM2JlOTBlMC0yNGFiLTVkMzgtYTM5ZC0zMTQ5ZGI5N2FlMjI6dmVyc2lvbnMiLCJ2YWx1ZXMiOnsiY3JlYXRlZCI6IjIwMjYtMTAtMTRUMDk6MzA6MDArMDA6MDAiLCJ2ZXJzaW9uX2lkIjoiNjUxOGViM2MtYzFlYi01ZjQ5LWExYmYtNjdjOTEzMDhlMzFlIn0sInZlcnNpb24iOjF9"
           }
         ],
-        "description": "Cursor is scoped to this archive and document. Returns the head version identity alongside a page ordered newest first."
+        "description": "Cursor is scoped to this archive and document. Returns the head version identity alongside a page ordered newest first. Returns items and pagination: {limit, next}. This is cursor/keyset traversal only. On the first request omit cursor; then pass each non-null pagination.next unchanged as cursor for this same collection. A null next ends traversal. limit is the effective maximum batch size, not the returned item count. No offsets or total-count queries are performed."
       }
     },
     "/api/v1/archive/documents": {
@@ -2677,70 +3264,108 @@
             }
           },
           "400": {
-            "description": "Invalid request. Raised framework errors may use JSON, HTML or plain text according to Sanic negotiation.",
+            "description": "Invalid request.",
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/Error"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SanicError"
-                    }
-                  ]
+                  "$ref": "#/components/schemas/ArchiveError"
                 },
                 "examples": {
                   "MissingArchiveManifest": {
-                    "$ref": "#/components/examples/MissingArchiveManifest"
-                  }
-                }
-              },
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                },
-                "examples": {
-                  "frameworkHtml": {
-                    "summary": "HTML error representation (abridged)",
-                    "description": "Illustrative HTML error content; Sanic controls the complete page markup.",
-                    "value": "<!doctype html><html><head><title>Bad Request</title></head><body><h1>Bad Request</h1><p>A JSON flow definition is required.</p></body></html>"
-                  }
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                },
-                "examples": {
-                  "frameworkText": {
-                    "summary": "Plain-text error representation",
-                    "value": "400 — Bad Request\nA JSON flow definition is required."
+                    "summary": "A snapshot manifest is required.",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "A snapshot manifest is required."
+                      }
+                    }
                   }
                 }
               }
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "'Unknown archive: missing'"
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "'Unknown archive: missing'"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "409": {
             "description": "Snapshot identity or version conflict",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ArchiveError"
                 },
                 "examples": {
                   "ArchiveConflict": {
-                    "$ref": "#/components/examples/ArchiveConflict"
+                    "summary": "A version identity was reused for different content",
+                    "value": {
+                      "error": {
+                        "code": "version_conflict",
+                        "message": "Version identity already exists"
+                      }
+                    }
                   }
                 }
               }
             }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -2751,7 +3376,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Reuse for the identical snapshot; explicitly supply manifest.created to make retries stable.",
+            "description": "Reuse for the identical snapshot; explicitly supply manifest.created_at to make retries stable.",
             "example": "invoice-2026-0042-snapshot-v1"
           }
         ],
@@ -2769,7 +3394,7 @@
                       "$ref": "#/components/schemas/ArchiveManifest"
                     },
                     "examples": [
-                      "{\"document_id\": \"c3be90e0-24ab-5d38-a39d-3149db97ae22\", \"version_id\": \"6518eb3c-c1eb-5f49-a1bf-67c91308e31e\", \"created\": \"2026-10-14T09:30:00+00:00\", \"expires\": \"2036-10-14T09:30:00+00:00\", \"document_type\": \"invoice\", \"metadata\": {\"invoice_number\": \"INV-2026-0042\", \"customer_id\": \"CUST-0042\", \"department\": \"accounts-receivable\", \"fiscal_year\": 2026}, \"default_representation_id\": \"a5f2a8ae-6f5d-59f8-bcff-51e359176286\", \"representations\": [{\"field\": \"invoice_pdf\", \"representation_id\": \"a5f2a8ae-6f5d-59f8-bcff-51e359176286\", \"name\": \"INV-2026-0042.pdf\", \"content_type\": \"application/pdf\", \"metadata\": {\"role\": \"human-readable\", \"language\": \"nl-BE\"}}, {\"field\": \"invoice_xml\", \"representation_id\": \"e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5\", \"name\": \"INV-2026-0042.xml\", \"content_type\": \"application/xml\", \"metadata\": {\"role\": \"structured-invoice\", \"standard\": \"UBL-2.1\"}}]}"
+                      "{\"id\": \"c3be90e0-24ab-5d38-a39d-3149db97ae22\", \"version\": {\"id\": \"6518eb3c-c1eb-5f49-a1bf-67c91308e31e\"}, \"created_at\": \"2026-10-14T09:30:00+00:00\", \"expires_at\": \"2036-10-14T09:30:00+00:00\", \"document_type\": \"invoice\", \"metadata\": {\"invoice_number\": \"INV-2026-0042\", \"customer_id\": \"CUST-0042\", \"department\": \"accounts-receivable\", \"fiscal_year\": 2026}, \"representations\": {\"default\": \"a5f2a8ae-6f5d-59f8-bcff-51e359176286\", \"items\": [{\"id\": \"a5f2a8ae-6f5d-59f8-bcff-51e359176286\", \"field\": \"invoice_pdf\", \"name\": \"INV-2026-0042.pdf\", \"metadata\": {\"role\": \"human-readable\", \"language\": \"nl-BE\"}, \"content\": {\"type\": \"application/pdf\"}}, {\"id\": \"e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5\", \"field\": \"invoice_xml\", \"name\": \"INV-2026-0042.xml\", \"metadata\": {\"role\": \"structured-invoice\", \"standard\": \"UBL-2.1\"}, \"content\": {\"type\": \"application/xml\"}}]}}"
                     ]
                   }
                 },
@@ -2783,7 +3408,7 @@
               }
             }
           },
-          "description": "manifest is a JSON-encoded form string, not an uploaded file. Other parts are binary files named by manifest.representations[].field."
+          "description": "manifest is a JSON-encoded form string, not an uploaded file. Other parts are binary files named by manifest.representations.items[].field."
         },
         "description": "Unscoped routes use archive=default. Returns 201 for a newly created document/version, 200 for replay or an existing equivalent snapshot. Different content under a reused identity conflicts.",
         "x-codeSamples": [
@@ -2846,40 +3471,99 @@
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "300": {
             "description": "Multiple equally ranked representations; select an exact representation URL.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    },
-                    "representations": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "format": "uuid"
-                      }
-                    }
-                  },
-                  "additionalProperties": true,
-                  "required": [
-                    "error",
-                    "representations"
-                  ]
+                  "$ref": "#/components/schemas/ArchiveError"
                 },
                 "examples": {
                   "ArchiveAmbiguous": {
-                    "$ref": "#/components/examples/ArchiveAmbiguous"
+                    "summary": "Two equally ranked PDF representations",
+                    "description": "For a version containing two non-default PDFs, choose an exact representation URL.",
+                    "value": {
+                      "error": {
+                        "code": "ambiguous_representation",
+                        "message": "representation selection is ambiguous"
+                      },
+                      "representation_ids": [
+                        "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                        "b826ed5a-77b0-5e66-b82b-cc64bd647096"
+                      ]
+                    }
                   }
                 }
+              }
+            },
+            "headers": {
+              "Vary": {
+                "description": "Representation selection depends on Accept.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "Accept"
               }
             }
           },
@@ -2888,13 +3572,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ArchiveError"
                 },
                 "examples": {
                   "ArchiveNotAcceptable": {
-                    "$ref": "#/components/examples/ArchiveNotAcceptable"
+                    "summary": "The requested media type is not stored",
+                    "value": {
+                      "error": {
+                        "code": "not_acceptable",
+                        "message": "requested content type is not available"
+                      }
+                    }
                   }
                 }
+              }
+            },
+            "headers": {
+              "Vary": {
+                "description": "Representation selection depends on Accept.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "Accept"
               }
             }
           }
@@ -2934,16 +3633,87 @@
             "description": "Successful response"
           },
           "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "A JSON flow definition is required."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "A JSON flow definition is required."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Retention or archive policy forbids deletion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "retentionProtected": {
+                    "summary": "Safe deletion before expiry is forbidden",
+                    "value": {
+                      "error": {
+                        "code": "forbidden",
+                        "message": "Cannot safely delete documents that are not expired."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -2965,11 +3735,11 @@
               "type": "string",
               "default": "true"
             },
-            "description": "Case-insensitive true/1/yes or false/0/no. Safe deletion respects retention; false requests unsafe deletion subject to archive policy.",
+            "description": "Case-insensitive true/1/yes or false/0/no. Defaults to true. Safe deletion rejects documents with no expiry or an expiry in the future; false bypasses the retention check.",
             "example": "true"
           }
         ],
-        "description": "Empty 202 when deletion is accepted; empty 200 when no new deletion is needed. Deletion is asynchronous."
+        "description": "Empty 202 when deletion is accepted; empty 200 if the document does not exist or is already deleted. Safe deletion checks the current version expiry; safe=false bypasses that check. Removal of bytes is asynchronous."
       }
     },
     "/api/v1/archive/documents/{document_id}/versions/{version_id}": {
@@ -3023,40 +3793,99 @@
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "300": {
             "description": "Multiple equally ranked representations; select an exact representation URL.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    },
-                    "representations": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "format": "uuid"
-                      }
-                    }
-                  },
-                  "additionalProperties": true,
-                  "required": [
-                    "error",
-                    "representations"
-                  ]
+                  "$ref": "#/components/schemas/ArchiveError"
                 },
                 "examples": {
                   "ArchiveAmbiguous": {
-                    "$ref": "#/components/examples/ArchiveAmbiguous"
+                    "summary": "Two equally ranked PDF representations",
+                    "description": "For a version containing two non-default PDFs, choose an exact representation URL.",
+                    "value": {
+                      "error": {
+                        "code": "ambiguous_representation",
+                        "message": "representation selection is ambiguous"
+                      },
+                      "representation_ids": [
+                        "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                        "b826ed5a-77b0-5e66-b82b-cc64bd647096"
+                      ]
+                    }
                   }
                 }
+              }
+            },
+            "headers": {
+              "Vary": {
+                "description": "Representation selection depends on Accept.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "Accept"
               }
             }
           },
@@ -3065,13 +3894,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ArchiveError"
                 },
                 "examples": {
                   "ArchiveNotAcceptable": {
-                    "$ref": "#/components/examples/ArchiveNotAcceptable"
+                    "summary": "The requested media type is not stored",
+                    "value": {
+                      "error": {
+                        "code": "not_acceptable",
+                        "message": "requested content type is not available"
+                      }
+                    }
                   }
                 }
+              }
+            },
+            "headers": {
+              "Vary": {
+                "description": "Representation selection depends on Accept.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "Accept"
               }
             }
           }
@@ -3159,10 +4003,66 @@
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -3226,16 +4126,78 @@
                 "examples": {
                   "ArchiveVersion": {
                     "$ref": "#/components/examples/ArchiveVersion"
+                  },
+                  "ArchiveChildVersion": {
+                    "$ref": "#/components/examples/ArchiveChildVersion"
+                  },
+                  "ArchiveMetadataOnlyVersion": {
+                    "$ref": "#/components/examples/ArchiveMetadataOnlyVersion"
                   }
                 }
               }
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -3277,10 +4239,66 @@
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -3316,16 +4334,78 @@
                 "examples": {
                   "ArchiveVersion": {
                     "$ref": "#/components/examples/ArchiveVersion"
+                  },
+                  "ArchiveChildVersion": {
+                    "$ref": "#/components/examples/ArchiveChildVersion"
+                  },
+                  "ArchiveMetadataOnlyVersion": {
+                    "$ref": "#/components/examples/ArchiveMetadataOnlyVersion"
                   }
                 }
               }
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -3377,10 +4457,66 @@
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -3429,61 +4565,96 @@
                   },
                   "ArchiveVersionsLastPage": {
                     "$ref": "#/components/examples/ArchiveVersionsLastPage"
+                  },
+                  "ArchiveVersionsExhausted": {
+                    "$ref": "#/components/examples/ArchiveVersionsExhausted"
                   }
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid request. Raised framework errors may use JSON, HTML or plain text according to Sanic negotiation.",
+            "description": "Invalid request.",
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/Error"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SanicError"
-                    }
-                  ]
+                  "$ref": "#/components/schemas/ArchiveError"
                 },
                 "examples": {
                   "InvalidPaginationCursor": {
-                    "$ref": "#/components/examples/InvalidPaginationCursor"
-                  }
-                }
-              },
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                },
-                "examples": {
-                  "frameworkHtml": {
-                    "summary": "HTML error representation (abridged)",
-                    "description": "Illustrative HTML error content; Sanic controls the complete page markup.",
-                    "value": "<!doctype html><html><head><title>Bad Request</title></head><body><h1>Bad Request</h1><p>A JSON flow definition is required.</p></body></html>"
-                  }
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                },
-                "examples": {
-                  "frameworkText": {
-                    "summary": "Plain-text error representation",
-                    "value": "400 — Bad Request\nA JSON flow definition is required."
+                    "summary": "cursor is invalid",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "cursor is invalid"
+                      }
+                    }
                   }
                 }
               }
             }
           },
           "404": {
-            "$ref": "#/components/responses/Error404"
+            "description": "Resource not found or capability disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Archived document or representation was not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
-            "$ref": "#/components/responses/UnexpectedError"
+            "description": "Unexpected error while processing a matched archive route. Gateway failures or framework errors before routing may use their own formats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "serviceError": {
+                    "summary": "Service-authored error response",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  },
+                  "frameworkError": {
+                    "summary": "Framework-negotiated JSON error",
+                    "description": "The precise Sanic message depends on the failed request; this shows the negotiated framework envelope.",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -3507,7 +4678,8 @@
               "maximum": 100,
               "default": 50
             },
-            "example": 1
+            "example": 1,
+            "description": "Maximum batch size (1–100, default 50). The response repeats the effective value in pagination.limit even when fewer items are returned. This is not a page number or offset."
           },
           {
             "name": "cursor",
@@ -3516,11 +4688,11 @@
             "schema": {
               "type": "string"
             },
-            "description": "Opaque cursor returned by this exact collection; omit on the first request.",
+            "description": "Opaque token returned in pagination.next by this exact collection. Omit for the first batch; pass each subsequent token unchanged (using normal URL query encoding). A token is not a URL or page number. Tokens from another collection are invalid.",
             "example": "eyJzY29wZSI6ImFyY2hpdmU6ZGVmYXVsdDpkb2N1bWVudDpjM2JlOTBlMC0yNGFiLTVkMzgtYTM5ZC0zMTQ5ZGI5N2FlMjI6dmVyc2lvbnMiLCJ2YWx1ZXMiOnsiY3JlYXRlZCI6IjIwMjYtMTAtMTRUMDk6MzA6MDArMDA6MDAiLCJ2ZXJzaW9uX2lkIjoiNjUxOGViM2MtYzFlYi01ZjQ5LWExYmYtNjdjOTEzMDhlMzFlIn0sInZlcnNpb24iOjF9"
           }
         ],
-        "description": "Cursor is scoped to this archive and document. Returns the head version identity alongside a page ordered newest first."
+        "description": "Cursor is scoped to this archive and document. Returns the head version identity alongside a page ordered newest first. Returns items and pagination: {limit, next}. This is cursor/keyset traversal only. On the first request omit cursor; then pass each non-null pagination.next unchanged as cursor for this same collection. A null next ends traversal. limit is the effective maximum batch size, not the returned item count. No offsets or total-count queries are performed."
       }
     },
     "/api/v1/ubl/validation/profiles": {
@@ -10646,7 +11818,7 @@
       "ArchiveRepresentation": {
         "type": "object",
         "properties": {
-          "representation_id": {
+          "id": {
             "type": "string",
             "format": "uuid"
           },
@@ -10656,70 +11828,37 @@
               "null"
             ]
           },
-          "content_type": {
-            "type": "string"
-          },
           "metadata": {
             "type": "object",
             "additionalProperties": true
           },
-          "checksum": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "sha512": {
-                    "type": "string"
-                  }
-                },
-                "additionalProperties": true,
-                "required": [
-                  "sha512"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "size": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "state": {
-            "type": "string"
+          "content": {
+            "$ref": "#/components/schemas/ArchiveContent"
           }
         },
-        "additionalProperties": true,
+        "additionalProperties": false,
         "required": [
-          "representation_id",
+          "id",
           "name",
-          "content_type",
           "metadata",
-          "checksum",
-          "size",
-          "state"
+          "content"
         ],
         "examples": [
           {
-            "representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+            "id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
             "name": "INV-2026-0042.pdf",
-            "content_type": "application/pdf",
             "metadata": {
               "role": "human-readable",
               "language": "nl-BE"
             },
-            "checksum": {
-              "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
-            },
-            "size": 18432,
-            "state": "available"
+            "content": {
+              "type": "application/pdf",
+              "checksum": {
+                "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
+              },
+              "size_bytes": 18432,
+              "availability": "available"
+            }
           }
         ]
       },
@@ -10728,25 +11867,14 @@
         "properties": {
           "id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Logical document UUID, scoped to the archive."
           },
           "archive": {
             "type": "string"
           },
-          "version_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "parent_version_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "version": {
+            "$ref": "#/components/schemas/ArchiveVersionIdentity"
           },
           "document_type": {
             "type": [
@@ -10758,11 +11886,12 @@
             "type": "object",
             "additionalProperties": true
           },
-          "created": {
+          "created_at": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "Caller-supplied creation time of this immutable snapshot, including timezone; not necessarily server ingestion time or HEAD ordering."
           },
-          "expires": {
+          "expires_at": {
             "anyOf": [
               {
                 "type": "string",
@@ -10771,42 +11900,40 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Retention/expiry boundary, including timezone, or null. Cleanup is asynchronous; this is not a deletion-completion timestamp."
           },
-          "state": {
-            "type": "string"
-          },
-          "default_representation_id": {
-            "type": "string",
-            "format": "uuid"
+          "content_availability": {
+            "enum": [
+              "available",
+              "metadata-only"
+            ],
+            "description": "Aggregate content retention: available while at least one representation retains bytes; metadata-only when none do. The default representation may already be metadata-only while another is available."
           },
           "representations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ArchiveRepresentation"
-            }
+            "$ref": "#/components/schemas/ArchiveRepresentationSet"
           }
         },
         "additionalProperties": true,
         "required": [
           "id",
           "archive",
-          "version_id",
-          "parent_version_id",
+          "version",
           "document_type",
           "metadata",
-          "created",
-          "expires",
-          "state",
-          "default_representation_id",
+          "created_at",
+          "expires_at",
+          "content_availability",
           "representations"
         ],
         "examples": [
           {
             "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
             "archive": "default",
-            "version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
-            "parent_version_id": null,
+            "version": {
+              "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+              "parent": null
+            },
             "document_type": "invoice",
             "metadata": {
               "invoice_number": "INV-2026-0042",
@@ -10814,178 +11941,54 @@
               "department": "accounts-receivable",
               "fiscal_year": 2026
             },
-            "created": "2026-10-14T09:30:00+00:00",
-            "expires": "2036-10-14T09:30:00+00:00",
-            "state": "available",
-            "default_representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-            "representations": [
-              {
-                "representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-                "name": "INV-2026-0042.pdf",
-                "content_type": "application/pdf",
-                "metadata": {
-                  "role": "human-readable",
-                  "language": "nl-BE"
+            "created_at": "2026-10-14T09:30:00+00:00",
+            "expires_at": "2036-10-14T09:30:00+00:00",
+            "content_availability": "available",
+            "representations": {
+              "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+              "items": [
+                {
+                  "id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                  "name": "INV-2026-0042.pdf",
+                  "metadata": {
+                    "role": "human-readable",
+                    "language": "nl-BE"
+                  },
+                  "content": {
+                    "type": "application/pdf",
+                    "checksum": {
+                      "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
+                    },
+                    "size_bytes": 18432,
+                    "availability": "available"
+                  }
                 },
-                "checksum": {
-                  "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
-                },
-                "size": 18432,
-                "state": "available"
-              },
-              {
-                "representation_id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
-                "name": "INV-2026-0042.xml",
-                "content_type": "application/xml",
-                "metadata": {
-                  "role": "structured-invoice",
-                  "standard": "UBL-2.1"
-                },
-                "checksum": {
-                  "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
-                },
-                "size": 8924,
-                "state": "available"
-              }
-            ]
-          }
-        ]
-      },
-      "ArchiveManifest": {
-        "type": "object",
-        "properties": {
-          "document_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "version_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "parent_version_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "created": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "expires": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "document_type": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": true
-          },
-          "default_representation_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "representations": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "object",
-              "properties": {
-                "field": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "representation_id": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "name": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "content_type": {
-                  "type": "string",
-                  "pattern": "^[^/\\s]+/[^/\\s]+$"
-                },
-                "metadata": {
-                  "type": "object",
-                  "additionalProperties": true
+                {
+                  "id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
+                  "name": "INV-2026-0042.xml",
+                  "metadata": {
+                    "role": "structured-invoice",
+                    "standard": "UBL-2.1"
+                  },
+                  "content": {
+                    "type": "application/xml",
+                    "checksum": {
+                      "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
+                    },
+                    "size_bytes": 8924,
+                    "availability": "available"
+                  }
                 }
-              },
-              "additionalProperties": true,
-              "required": [
-                "field",
-                "content_type"
               ]
             }
-          }
-        },
-        "additionalProperties": true,
-        "required": [
-          "representations"
-        ],
-        "description": "Complete immutable snapshot. Each unique field names an uploaded file. created requires a timezone and is mandatory when Idempotency-Key is supplied. expires must be later than created. Multiple representations require a default_representation_id belonging to the version. Identity fields omitted by clients are derived from the idempotency key.",
-        "examples": [
-          {
-            "document_id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-            "version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
-            "created": "2026-10-14T09:30:00+00:00",
-            "expires": "2036-10-14T09:30:00+00:00",
-            "document_type": "invoice",
-            "metadata": {
-              "invoice_number": "INV-2026-0042",
-              "customer_id": "CUST-0042",
-              "department": "accounts-receivable",
-              "fiscal_year": 2026
-            },
-            "default_representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-            "representations": [
-              {
-                "field": "invoice_pdf",
-                "representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-                "name": "INV-2026-0042.pdf",
-                "content_type": "application/pdf",
-                "metadata": {
-                  "role": "human-readable",
-                  "language": "nl-BE"
-                }
-              },
-              {
-                "field": "invoice_xml",
-                "representation_id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
-                "name": "INV-2026-0042.xml",
-                "content_type": "application/xml",
-                "metadata": {
-                  "role": "structured-invoice",
-                  "standard": "UBL-2.1"
-                }
-              }
-            ]
           },
           {
-            "document_id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-            "version_id": "43d7c2eb-ce46-568b-a7af-fe0b2318af7d",
-            "created": "2026-10-14T11:00:00+00:00",
-            "expires": "2036-10-14T09:30:00+00:00",
+            "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+            "archive": "default",
+            "version": {
+              "id": "43d7c2eb-ce46-568b-a7af-fe0b2318af7d",
+              "parent": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e"
+            },
             "document_type": "invoice",
             "metadata": {
               "invoice_number": "INV-2026-0042",
@@ -10994,30 +11997,288 @@
               "fiscal_year": 2026,
               "revision_reason": "Corrected customer postal address"
             },
-            "default_representation_id": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
-            "representations": [
-              {
-                "field": "invoice_pdf",
-                "representation_id": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
-                "name": "INV-2026-0042.pdf",
-                "content_type": "application/pdf",
-                "metadata": {
-                  "role": "human-readable",
-                  "language": "nl-BE"
+            "created_at": "2026-10-14T11:00:00+00:00",
+            "expires_at": "2036-10-14T09:30:00+00:00",
+            "content_availability": "available",
+            "representations": {
+              "default": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
+              "items": [
+                {
+                  "id": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
+                  "name": "INV-2026-0042.pdf",
+                  "metadata": {
+                    "role": "human-readable",
+                    "language": "nl-BE"
+                  },
+                  "content": {
+                    "type": "application/pdf",
+                    "checksum": {
+                      "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
+                    },
+                    "size_bytes": 18432,
+                    "availability": "available"
+                  }
+                },
+                {
+                  "id": "d6d1ee4b-d769-539c-9766-c3cae71a470a",
+                  "name": "INV-2026-0042.xml",
+                  "metadata": {
+                    "role": "structured-invoice",
+                    "standard": "UBL-2.1"
+                  },
+                  "content": {
+                    "type": "application/xml",
+                    "checksum": {
+                      "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
+                    },
+                    "size_bytes": 8924,
+                    "availability": "available"
+                  }
                 }
+              ]
+            }
+          },
+          {
+            "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+            "archive": "default",
+            "version": {
+              "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+              "parent": null
+            },
+            "document_type": "invoice",
+            "metadata": {
+              "invoice_number": "INV-2026-0042",
+              "customer_id": "CUST-0042",
+              "department": "accounts-receivable",
+              "fiscal_year": 2026
+            },
+            "created_at": "2026-10-14T09:30:00+00:00",
+            "expires_at": "2026-10-14T09:35:00+00:00",
+            "content_availability": "metadata-only",
+            "representations": {
+              "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+              "items": [
+                {
+                  "id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                  "name": "INV-2026-0042.pdf",
+                  "metadata": {
+                    "role": "human-readable",
+                    "language": "nl-BE"
+                  },
+                  "content": {
+                    "type": "application/pdf",
+                    "checksum": {
+                      "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
+                    },
+                    "size_bytes": 18432,
+                    "availability": "metadata-only"
+                  }
+                },
+                {
+                  "id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
+                  "name": "INV-2026-0042.xml",
+                  "metadata": {
+                    "role": "structured-invoice",
+                    "standard": "UBL-2.1"
+                  },
+                  "content": {
+                    "type": "application/xml",
+                    "checksum": {
+                      "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
+                    },
+                    "size_bytes": 8924,
+                    "availability": "metadata-only"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "ArchiveManifest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "version": {
+            "$ref": "#/components/schemas/ArchiveVersionInput"
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "document_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "metadata": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "representations": {
+            "type": "object",
+            "properties": {
+              "default": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
               },
-              {
-                "field": "invoice_xml",
-                "representation_id": "d6d1ee4b-d769-539c-9766-c3cae71a470a",
-                "name": "INV-2026-0042.xml",
-                "content_type": "application/xml",
-                "metadata": {
-                  "role": "structured-invoice",
-                  "standard": "UBL-2.1"
+              "items": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/components/schemas/ArchiveRepresentationUpload"
                 }
               }
+            },
+            "additionalProperties": false,
+            "required": [
+              "items"
             ],
-            "parent_version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e"
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "items": {
+                      "minItems": 2
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "default"
+                  ],
+                  "properties": {
+                    "default": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "representations"
+        ],
+        "description": "Complete immutable snapshot. created_at is required and must be stable when Idempotency-Key is supplied; otherwise it defaults to server time. expires_at must be later than created_at; a document type may supply a default retention interval. representations.default must identify an item and is required for multiple items. Fields and representation IDs must be unique. Omitted IDs are derived. Unknown fields, including obsolete flat identities, are rejected. Version identity and expected-parent checks precede equivalent-snapshot detection.",
+        "examples": [
+          {
+            "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+            "version": {
+              "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e"
+            },
+            "created_at": "2026-10-14T09:30:00+00:00",
+            "expires_at": "2036-10-14T09:30:00+00:00",
+            "document_type": "invoice",
+            "metadata": {
+              "invoice_number": "INV-2026-0042",
+              "customer_id": "CUST-0042",
+              "department": "accounts-receivable",
+              "fiscal_year": 2026
+            },
+            "representations": {
+              "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+              "items": [
+                {
+                  "id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                  "field": "invoice_pdf",
+                  "name": "INV-2026-0042.pdf",
+                  "metadata": {
+                    "role": "human-readable",
+                    "language": "nl-BE"
+                  },
+                  "content": {
+                    "type": "application/pdf"
+                  }
+                },
+                {
+                  "id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
+                  "field": "invoice_xml",
+                  "name": "INV-2026-0042.xml",
+                  "metadata": {
+                    "role": "structured-invoice",
+                    "standard": "UBL-2.1"
+                  },
+                  "content": {
+                    "type": "application/xml"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+            "version": {
+              "id": "43d7c2eb-ce46-568b-a7af-fe0b2318af7d",
+              "parent": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e"
+            },
+            "created_at": "2026-10-14T11:00:00+00:00",
+            "expires_at": "2036-10-14T09:30:00+00:00",
+            "document_type": "invoice",
+            "metadata": {
+              "invoice_number": "INV-2026-0042",
+              "customer_id": "CUST-0042",
+              "department": "accounts-receivable",
+              "fiscal_year": 2026,
+              "revision_reason": "Corrected customer postal address"
+            },
+            "representations": {
+              "default": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
+              "items": [
+                {
+                  "id": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
+                  "field": "invoice_pdf",
+                  "name": "INV-2026-0042.pdf",
+                  "metadata": {
+                    "role": "human-readable",
+                    "language": "nl-BE"
+                  },
+                  "content": {
+                    "type": "application/pdf"
+                  }
+                },
+                {
+                  "id": "d6d1ee4b-d769-539c-9766-c3cae71a470a",
+                  "field": "invoice_xml",
+                  "name": "INV-2026-0042.xml",
+                  "metadata": {
+                    "role": "structured-invoice",
+                    "standard": "UBL-2.1"
+                  },
+                  "content": {
+                    "type": "application/xml"
+                  }
+                }
+              ]
+            }
           }
         ]
       },
@@ -11027,80 +12288,44 @@
           "archive": {
             "type": "string"
           },
-          "document_id": {
+          "id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Logical document UUID, scoped to the archive."
           },
-          "version_id": {
-            "type": "string",
-            "format": "uuid"
+          "version": {
+            "$ref": "#/components/schemas/ArchiveVersionIdentity"
           },
           "outcome": {
             "type": "string"
-          },
-          "default_representation_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "representations": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": true
-            }
-          },
-          "replayed": {
-            "type": "boolean"
           }
         },
-        "additionalProperties": true,
+        "additionalProperties": false,
         "required": [
           "archive",
-          "document_id",
-          "version_id",
-          "outcome",
-          "default_representation_id",
-          "representations",
-          "replayed"
+          "id",
+          "version",
+          "outcome"
         ],
+        "description": "Concise write acknowledgement. Use the details or representations endpoint to resolve server-generated representation IDs, metadata, checksums and sizes. Exact retries retain the original outcome and identities.",
         "examples": [
           {
             "archive": "default",
-            "document_id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-            "version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
-            "outcome": "created",
-            "default_representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-            "representations": [
-              {
-                "representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-                "name": "INV-2026-0042.pdf",
-                "content_type": "application/pdf",
-                "metadata": {
-                  "role": "human-readable",
-                  "language": "nl-BE"
-                },
-                "checksum": {
-                  "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
-                },
-                "size": 18432,
-                "state": "available"
-              },
-              {
-                "representation_id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
-                "name": "INV-2026-0042.xml",
-                "content_type": "application/xml",
-                "metadata": {
-                  "role": "structured-invoice",
-                  "standard": "UBL-2.1"
-                },
-                "checksum": {
-                  "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
-                },
-                "size": 8924,
-                "state": "available"
-              }
-            ],
-            "replayed": false
+            "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+            "version": {
+              "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+              "parent": null
+            },
+            "outcome": "created"
+          },
+          {
+            "archive": "default",
+            "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+            "version": {
+              "id": "43d7c2eb-ce46-568b-a7af-fe0b2318af7d",
+              "parent": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e"
+            },
+            "outcome": "version_created"
           }
         ]
       },
@@ -11110,69 +12335,70 @@
           "archive": {
             "type": "string"
           },
-          "document_id": {
+          "id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Logical document UUID, scoped to the archive."
           },
-          "version_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "default_representation_id": {
-            "type": "string",
-            "format": "uuid"
+          "version": {
+            "$ref": "#/components/schemas/ArchiveVersionIdentity"
           },
           "representations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ArchiveRepresentation"
-            }
+            "$ref": "#/components/schemas/ArchiveRepresentationSet"
           }
         },
         "additionalProperties": true,
         "required": [
           "archive",
-          "document_id",
-          "version_id",
-          "default_representation_id",
+          "id",
+          "version",
           "representations"
         ],
         "examples": [
           {
             "archive": "default",
-            "document_id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-            "version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
-            "default_representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-            "representations": [
-              {
-                "representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-                "name": "INV-2026-0042.pdf",
-                "content_type": "application/pdf",
-                "metadata": {
-                  "role": "human-readable",
-                  "language": "nl-BE"
+            "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+            "version": {
+              "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+              "parent": null
+            },
+            "representations": {
+              "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+              "items": [
+                {
+                  "id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                  "name": "INV-2026-0042.pdf",
+                  "metadata": {
+                    "role": "human-readable",
+                    "language": "nl-BE"
+                  },
+                  "content": {
+                    "type": "application/pdf",
+                    "checksum": {
+                      "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
+                    },
+                    "size_bytes": 18432,
+                    "availability": "available"
+                  }
                 },
-                "checksum": {
-                  "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
-                },
-                "size": 18432,
-                "state": "available"
-              },
-              {
-                "representation_id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
-                "name": "INV-2026-0042.xml",
-                "content_type": "application/xml",
-                "metadata": {
-                  "role": "structured-invoice",
-                  "standard": "UBL-2.1"
-                },
-                "checksum": {
-                  "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
-                },
-                "size": 8924,
-                "state": "available"
-              }
-            ]
+                {
+                  "id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
+                  "name": "INV-2026-0042.xml",
+                  "metadata": {
+                    "role": "structured-invoice",
+                    "standard": "UBL-2.1"
+                  },
+                  "content": {
+                    "type": "application/xml",
+                    "checksum": {
+                      "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
+                    },
+                    "size_bytes": 8924,
+                    "availability": "available"
+                  }
+                }
+              ]
+            }
           }
         ]
       },
@@ -11182,9 +12408,10 @@
           "archive": {
             "type": "string"
           },
-          "document_id": {
+          "id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Logical document UUID, scoped to the archive."
           },
           "head_version_id": {
             "type": "string",
@@ -11196,32 +12423,31 @@
               "$ref": "#/components/schemas/ArchiveVersion"
             }
           },
-          "next_cursor": {
-            "type": [
-              "string",
-              "null"
-            ]
+          "pagination": {
+            "$ref": "#/components/schemas/CursorPagination"
           }
         },
         "additionalProperties": true,
         "required": [
           "archive",
-          "document_id",
+          "id",
           "head_version_id",
           "items",
-          "next_cursor"
+          "pagination"
         ],
         "examples": [
           {
             "archive": "default",
-            "document_id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+            "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
             "head_version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
             "items": [
               {
                 "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
                 "archive": "default",
-                "version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
-                "parent_version_id": null,
+                "version": {
+                  "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+                  "parent": null
+                },
                 "document_type": "invoice",
                 "metadata": {
                   "invoice_number": "INV-2026-0042",
@@ -11229,43 +12455,62 @@
                   "department": "accounts-receivable",
                   "fiscal_year": 2026
                 },
-                "created": "2026-10-14T09:30:00+00:00",
-                "expires": "2036-10-14T09:30:00+00:00",
-                "state": "available",
-                "default_representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-                "representations": [
-                  {
-                    "representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-                    "name": "INV-2026-0042.pdf",
-                    "content_type": "application/pdf",
-                    "metadata": {
-                      "role": "human-readable",
-                      "language": "nl-BE"
+                "created_at": "2026-10-14T09:30:00+00:00",
+                "expires_at": "2036-10-14T09:30:00+00:00",
+                "content_availability": "available",
+                "representations": {
+                  "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                  "items": [
+                    {
+                      "id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                      "name": "INV-2026-0042.pdf",
+                      "metadata": {
+                        "role": "human-readable",
+                        "language": "nl-BE"
+                      },
+                      "content": {
+                        "type": "application/pdf",
+                        "checksum": {
+                          "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
+                        },
+                        "size_bytes": 18432,
+                        "availability": "available"
+                      }
                     },
-                    "checksum": {
-                      "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
-                    },
-                    "size": 18432,
-                    "state": "available"
-                  },
-                  {
-                    "representation_id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
-                    "name": "INV-2026-0042.xml",
-                    "content_type": "application/xml",
-                    "metadata": {
-                      "role": "structured-invoice",
-                      "standard": "UBL-2.1"
-                    },
-                    "checksum": {
-                      "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
-                    },
-                    "size": 8924,
-                    "state": "available"
-                  }
-                ]
+                    {
+                      "id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
+                      "name": "INV-2026-0042.xml",
+                      "metadata": {
+                        "role": "structured-invoice",
+                        "standard": "UBL-2.1"
+                      },
+                      "content": {
+                        "type": "application/xml",
+                        "checksum": {
+                          "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
+                        },
+                        "size_bytes": 8924,
+                        "availability": "available"
+                      }
+                    }
+                  ]
+                }
               }
             ],
-            "next_cursor": null
+            "pagination": {
+              "limit": 50,
+              "next": null
+            }
+          },
+          {
+            "archive": "default",
+            "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+            "head_version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+            "items": [],
+            "pagination": {
+              "limit": 50,
+              "next": null
+            }
           }
         ]
       },
@@ -17211,6 +18456,342 @@
             }
           }
         ]
+      },
+      "ArchiveVersionIdentity": {
+        "type": "object",
+        "description": "Identity of the returned immutable snapshot. parent is the preceding version UUID, or null for the first version; it is not an embedded version object.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id",
+          "parent"
+        ],
+        "additionalProperties": false,
+        "examples": [
+          {
+            "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+            "parent": null
+          },
+          {
+            "id": "43d7c2eb-ce46-568b-a7af-fe0b2318af7d",
+            "parent": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e"
+          }
+        ]
+      },
+      "ArchiveContent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "checksum": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "sha512": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{128}$"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "sha512"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "size_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "availability": {
+            "enum": [
+              "available",
+              "metadata-only"
+            ],
+            "description": "available means the archive records these bytes as retained; metadata-only means they were removed. Not a live storage-health or workflow status. Checksum and size describe the original bytes even after removal."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "checksum",
+          "size_bytes",
+          "availability"
+        ],
+        "examples": [
+          {
+            "type": "application/pdf",
+            "checksum": {
+              "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
+            },
+            "size_bytes": 18432,
+            "availability": "available"
+          },
+          {
+            "type": "application/pdf",
+            "checksum": {
+              "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
+            },
+            "size_bytes": 18432,
+            "availability": "metadata-only"
+          }
+        ]
+      },
+      "ArchiveRepresentationSet": {
+        "type": "object",
+        "properties": {
+          "default": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/ArchiveRepresentation"
+            }
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "default",
+          "items"
+        ],
+        "description": "Representations of one immutable version. default references one items[].id. Metadata-only representations remain listed.",
+        "examples": [
+          {
+            "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+            "items": [
+              {
+                "id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                "name": "INV-2026-0042.pdf",
+                "metadata": {
+                  "role": "human-readable",
+                  "language": "nl-BE"
+                },
+                "content": {
+                  "type": "application/pdf",
+                  "checksum": {
+                    "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
+                  },
+                  "size_bytes": 18432,
+                  "availability": "available"
+                }
+              },
+              {
+                "id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
+                "name": "INV-2026-0042.xml",
+                "metadata": {
+                  "role": "structured-invoice",
+                  "standard": "UBL-2.1"
+                },
+                "content": {
+                  "type": "application/xml",
+                  "checksum": {
+                    "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
+                  },
+                  "size_bytes": 8924,
+                  "availability": "available"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "ArchiveVersionInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Optional requested version identity; omitted/null id is derived by the server. parent is the expected current HEAD (optimistic concurrency), not an embedded object. The returned stored parent can differ on an unchanged result.",
+        "examples": [
+          {
+            "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e"
+          },
+          {
+            "id": "43d7c2eb-ce46-568b-a7af-fe0b2318af7d",
+            "parent": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e"
+          }
+        ]
+      },
+      "ArchiveRepresentationUpload": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "If supplied, nonblank and without control characters."
+          },
+          "metadata": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "field": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9!#$%&*+.^_`|~-]+/[A-Za-z0-9!#$%&*+.^_`|~-]+$"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "type"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "field",
+          "content"
+        ],
+        "description": "field identifies a binary multipart part. content.type declares its media type without parameters; checksum, size_bytes and availability are server-owned and cannot be submitted.",
+        "examples": [
+          {
+            "id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+            "field": "invoice_pdf",
+            "name": "INV-2026-0042.pdf",
+            "metadata": {
+              "role": "human-readable",
+              "language": "nl-BE"
+            },
+            "content": {
+              "type": "application/pdf"
+            }
+          }
+        ]
+      },
+      "ArchiveError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message"
+            ]
+          },
+          "representation_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "description": "Stable machine-readable code and human-readable message. Only ambiguous representation selection includes representation_ids; these are scalar references, not representation objects.",
+        "examples": [
+          {
+            "error": {
+              "code": "version_conflict",
+              "message": "Version identity already exists"
+            }
+          },
+          {
+            "error": {
+              "code": "bad_request",
+              "message": "Unsupported manifest fields: document_id"
+            }
+          }
+        ]
+      },
+      "CursorPagination": {
+        "type": "object",
+        "description": "Cursor/keyset continuation for a bounded collection batch. There are no page numbers, offsets, total counts, or total pages.",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Effective maximum batch size. May exceed the number of returned items, including when items is empty. These endpoints default to 50."
+          },
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "description": "Opaque continuation token, or null when no further results exist. Pass a non-null value unchanged as the next request's cursor query parameter, with the same collection and query criteria. This is not a URL or page number; do not decode or construct it. Omit cursor to restart traversal."
+          }
+        },
+        "required": [
+          "limit",
+          "next"
+        ],
+        "additionalProperties": false,
+        "examples": [
+          {
+            "limit": 1,
+            "next": "eyJzY29wZSI6ImRvY3VtZW50LXR5cGVzIiwidmFsdWVzIjp7ImlkZW50aWZpZXIiOiJpbnZvaWNlIn0sInZlcnNpb24iOjF9"
+          },
+          {
+            "limit": 50,
+            "next": null
+          }
+        ]
       }
     },
     "examples": {
@@ -20273,7 +21854,7 @@
         }
       },
       "DocumentTypesFirstPage": {
-        "summary": "First page with an opaque continuation cursor",
+        "summary": "First batch with an opaque continuation cursor",
         "value": {
           "items": [
             {
@@ -20289,12 +21870,15 @@
               }
             }
           ],
-          "next_cursor": "eyJzY29wZSI6ImRvY3VtZW50LXR5cGVzIiwidmFsdWVzIjp7ImlkZW50aWZpZXIiOiJpbnZvaWNlIn0sInZlcnNpb24iOjF9"
+          "pagination": {
+            "limit": 1,
+            "next": "eyJzY29wZSI6ImRvY3VtZW50LXR5cGVzIiwidmFsdWVzIjp7ImlkZW50aWZpZXIiOiJpbnZvaWNlIn0sInZlcnNpb24iOjF9"
+          }
         },
-        "description": "Illustrative page requested with limit=1; pass next_cursor unchanged to the next request."
+        "description": "Requested with limit=1. Pass pagination.next unchanged as the next request's cursor query parameter for this same collection. It is an opaque token, not a URL or page number."
       },
       "DocumentTypesLastPage": {
-        "summary": "Last page; no further results",
+        "summary": "Last batch; no further results",
         "value": {
           "items": [
             {
@@ -20310,8 +21894,12 @@
               }
             }
           ],
-          "next_cursor": null
-        }
+          "pagination": {
+            "limit": 50,
+            "next": null
+          }
+        },
+        "description": "Requested with limit=50. Fewer items remain; pagination.limit still reports 50. A null pagination.next ends traversal."
       },
       "DocumentCheckValid": {
         "summary": "Valid render envelope with merged defaults",
@@ -20396,10 +21984,12 @@
       "ArchiveSnapshotManifest": {
         "summary": "One immutable invoice version with PDF and UBL representations",
         "value": {
-          "document_id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-          "version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
-          "created": "2026-10-14T09:30:00+00:00",
-          "expires": "2036-10-14T09:30:00+00:00",
+          "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+          "version": {
+            "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e"
+          },
+          "created_at": "2026-10-14T09:30:00+00:00",
+          "expires_at": "2036-10-14T09:30:00+00:00",
           "document_type": "invoice",
           "metadata": {
             "invoice_number": "INV-2026-0042",
@@ -20407,39 +21997,47 @@
             "department": "accounts-receivable",
             "fiscal_year": 2026
           },
-          "default_representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-          "representations": [
-            {
-              "field": "invoice_pdf",
-              "representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-              "name": "INV-2026-0042.pdf",
-              "content_type": "application/pdf",
-              "metadata": {
-                "role": "human-readable",
-                "language": "nl-BE"
+          "representations": {
+            "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+            "items": [
+              {
+                "id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                "field": "invoice_pdf",
+                "name": "INV-2026-0042.pdf",
+                "metadata": {
+                  "role": "human-readable",
+                  "language": "nl-BE"
+                },
+                "content": {
+                  "type": "application/pdf"
+                }
+              },
+              {
+                "id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
+                "field": "invoice_xml",
+                "name": "INV-2026-0042.xml",
+                "metadata": {
+                  "role": "structured-invoice",
+                  "standard": "UBL-2.1"
+                },
+                "content": {
+                  "type": "application/xml"
+                }
               }
-            },
-            {
-              "field": "invoice_xml",
-              "representation_id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
-              "name": "INV-2026-0042.xml",
-              "content_type": "application/xml",
-              "metadata": {
-                "role": "structured-invoice",
-                "standard": "UBL-2.1"
-              }
-            }
-          ]
+            ]
+          }
         },
-        "description": "Save this object as manifest.json and send its JSON text as a form field. Binary parts are invoice_pdf and invoice_xml. created must stay unchanged for retries with Idempotency-Key."
+        "description": "Save this object as manifest.json and send its JSON text as a form field. Binary parts are invoice_pdf and invoice_xml. created_at must stay unchanged for retries with Idempotency-Key."
       },
       "ArchiveVersion": {
         "summary": "Complete metadata for a two-representation invoice",
         "value": {
           "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
           "archive": "default",
-          "version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
-          "parent_version_id": null,
+          "version": {
+            "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+            "parent": null
+          },
           "document_type": "invoice",
           "metadata": {
             "invoice_number": "INV-2026-0042",
@@ -20447,40 +22045,46 @@
             "department": "accounts-receivable",
             "fiscal_year": 2026
           },
-          "created": "2026-10-14T09:30:00+00:00",
-          "expires": "2036-10-14T09:30:00+00:00",
-          "state": "available",
-          "default_representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-          "representations": [
-            {
-              "representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-              "name": "INV-2026-0042.pdf",
-              "content_type": "application/pdf",
-              "metadata": {
-                "role": "human-readable",
-                "language": "nl-BE"
+          "created_at": "2026-10-14T09:30:00+00:00",
+          "expires_at": "2036-10-14T09:30:00+00:00",
+          "content_availability": "available",
+          "representations": {
+            "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+            "items": [
+              {
+                "id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                "name": "INV-2026-0042.pdf",
+                "metadata": {
+                  "role": "human-readable",
+                  "language": "nl-BE"
+                },
+                "content": {
+                  "type": "application/pdf",
+                  "checksum": {
+                    "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
+                  },
+                  "size_bytes": 18432,
+                  "availability": "available"
+                }
               },
-              "checksum": {
-                "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
-              },
-              "size": 18432,
-              "state": "available"
-            },
-            {
-              "representation_id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
-              "name": "INV-2026-0042.xml",
-              "content_type": "application/xml",
-              "metadata": {
-                "role": "structured-invoice",
-                "standard": "UBL-2.1"
-              },
-              "checksum": {
-                "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
-              },
-              "size": 8924,
-              "state": "available"
-            }
-          ]
+              {
+                "id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
+                "name": "INV-2026-0042.xml",
+                "metadata": {
+                  "role": "structured-invoice",
+                  "standard": "UBL-2.1"
+                },
+                "content": {
+                  "type": "application/xml",
+                  "checksum": {
+                    "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
+                  },
+                  "size_bytes": 8924,
+                  "availability": "available"
+                }
+              }
+            ]
+          }
         },
         "description": "Sizes and digests are illustrative; actual checksums are computed from uploaded bytes."
       },
@@ -20488,172 +22092,98 @@
         "summary": "Discover PDF and XML representations before downloading",
         "value": {
           "archive": "default",
-          "document_id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-          "version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
-          "default_representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-          "representations": [
-            {
-              "representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-              "name": "INV-2026-0042.pdf",
-              "content_type": "application/pdf",
-              "metadata": {
-                "role": "human-readable",
-                "language": "nl-BE"
+          "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+          "version": {
+            "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+            "parent": null
+          },
+          "representations": {
+            "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+            "items": [
+              {
+                "id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                "name": "INV-2026-0042.pdf",
+                "metadata": {
+                  "role": "human-readable",
+                  "language": "nl-BE"
+                },
+                "content": {
+                  "type": "application/pdf",
+                  "checksum": {
+                    "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
+                  },
+                  "size_bytes": 18432,
+                  "availability": "available"
+                }
               },
-              "checksum": {
-                "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
-              },
-              "size": 18432,
-              "state": "available"
-            },
-            {
-              "representation_id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
-              "name": "INV-2026-0042.xml",
-              "content_type": "application/xml",
-              "metadata": {
-                "role": "structured-invoice",
-                "standard": "UBL-2.1"
-              },
-              "checksum": {
-                "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
-              },
-              "size": 8924,
-              "state": "available"
-            }
-          ]
+              {
+                "id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
+                "name": "INV-2026-0042.xml",
+                "metadata": {
+                  "role": "structured-invoice",
+                  "standard": "UBL-2.1"
+                },
+                "content": {
+                  "type": "application/xml",
+                  "checksum": {
+                    "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
+                  },
+                  "size_bytes": 8924,
+                  "availability": "available"
+                }
+              }
+            ]
+          }
         }
       },
       "ArchiveCreated": {
         "summary": "New immutable document version stored",
         "value": {
           "archive": "default",
-          "document_id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-          "version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
-          "outcome": "created",
-          "default_representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-          "representations": [
-            {
-              "representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-              "name": "INV-2026-0042.pdf",
-              "content_type": "application/pdf",
-              "metadata": {
-                "role": "human-readable",
-                "language": "nl-BE"
-              },
-              "checksum": {
-                "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
-              },
-              "size": 18432,
-              "state": "available"
-            },
-            {
-              "representation_id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
-              "name": "INV-2026-0042.xml",
-              "content_type": "application/xml",
-              "metadata": {
-                "role": "structured-invoice",
-                "standard": "UBL-2.1"
-              },
-              "checksum": {
-                "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
-              },
-              "size": 8924,
-              "state": "available"
-            }
-          ],
-          "replayed": false
+          "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+          "version": {
+            "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+            "parent": null
+          },
+          "outcome": "created"
         }
       },
       "ArchiveReplayed": {
         "summary": "An identical snapshot request was replayed",
+        "description": "HTTP 200 returns the original operation's outcome and identities. No new version is created and no replay flag is exposed.",
         "value": {
           "archive": "default",
-          "document_id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-          "version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
-          "outcome": "created",
-          "default_representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-          "representations": [
-            {
-              "representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-              "name": "INV-2026-0042.pdf",
-              "content_type": "application/pdf",
-              "metadata": {
-                "role": "human-readable",
-                "language": "nl-BE"
-              },
-              "checksum": {
-                "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
-              },
-              "size": 18432,
-              "state": "available"
-            },
-            {
-              "representation_id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
-              "name": "INV-2026-0042.xml",
-              "content_type": "application/xml",
-              "metadata": {
-                "role": "structured-invoice",
-                "standard": "UBL-2.1"
-              },
-              "checksum": {
-                "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
-              },
-              "size": 8924,
-              "state": "available"
-            }
-          ],
-          "replayed": true
+          "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+          "version": {
+            "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+            "parent": null
+          },
+          "outcome": "created"
         }
       },
       "ArchiveUnchanged": {
         "summary": "An equivalent snapshot already exists",
         "value": {
           "archive": "default",
-          "document_id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-          "version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
-          "outcome": "unchanged",
-          "default_representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-          "representations": [
-            {
-              "representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-              "name": "INV-2026-0042.pdf",
-              "content_type": "application/pdf",
-              "metadata": {
-                "role": "human-readable",
-                "language": "nl-BE"
-              },
-              "checksum": {
-                "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
-              },
-              "size": 18432,
-              "state": "available"
-            },
-            {
-              "representation_id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
-              "name": "INV-2026-0042.xml",
-              "content_type": "application/xml",
-              "metadata": {
-                "role": "structured-invoice",
-                "standard": "UBL-2.1"
-              },
-              "checksum": {
-                "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
-              },
-              "size": 8924,
-              "state": "available"
-            }
-          ],
-          "replayed": false
+          "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+          "version": {
+            "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+            "parent": null
+          },
+          "outcome": "unchanged"
         },
-        "description": "HTTP 200 can represent equivalent content without an idempotency-key replay; replayed remains false."
+        "description": "HTTP 200 can represent equivalent content without an idempotency-key replay; outcome is unchanged."
       },
       "ArchiveNewVersionManifest": {
         "summary": "Append a complete second version with its parent identity",
         "value": {
-          "document_id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-          "version_id": "43d7c2eb-ce46-568b-a7af-fe0b2318af7d",
-          "created": "2026-10-14T11:00:00+00:00",
-          "expires": "2036-10-14T09:30:00+00:00",
+          "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+          "version": {
+            "id": "43d7c2eb-ce46-568b-a7af-fe0b2318af7d",
+            "parent": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e"
+          },
+          "created_at": "2026-10-14T11:00:00+00:00",
+          "expires_at": "2036-10-14T09:30:00+00:00",
           "document_type": "invoice",
           "metadata": {
             "invoice_number": "INV-2026-0042",
@@ -20662,30 +22192,35 @@
             "fiscal_year": 2026,
             "revision_reason": "Corrected customer postal address"
           },
-          "default_representation_id": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
-          "representations": [
-            {
-              "field": "invoice_pdf",
-              "representation_id": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
-              "name": "INV-2026-0042.pdf",
-              "content_type": "application/pdf",
-              "metadata": {
-                "role": "human-readable",
-                "language": "nl-BE"
+          "representations": {
+            "default": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
+            "items": [
+              {
+                "id": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
+                "field": "invoice_pdf",
+                "name": "INV-2026-0042.pdf",
+                "metadata": {
+                  "role": "human-readable",
+                  "language": "nl-BE"
+                },
+                "content": {
+                  "type": "application/pdf"
+                }
+              },
+              {
+                "id": "d6d1ee4b-d769-539c-9766-c3cae71a470a",
+                "field": "invoice_xml",
+                "name": "INV-2026-0042.xml",
+                "metadata": {
+                  "role": "structured-invoice",
+                  "standard": "UBL-2.1"
+                },
+                "content": {
+                  "type": "application/xml"
+                }
               }
-            },
-            {
-              "field": "invoice_xml",
-              "representation_id": "d6d1ee4b-d769-539c-9766-c3cae71a470a",
-              "name": "INV-2026-0042.xml",
-              "content_type": "application/xml",
-              "metadata": {
-                "role": "structured-invoice",
-                "standard": "UBL-2.1"
-              }
-            }
-          ],
-          "parent_version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e"
+            ]
+          }
         },
         "description": "Requires an archive policy permitting versions. Resend both representation files; a version is a full snapshot, not a metadata patch."
       },
@@ -20693,56 +22228,29 @@
         "summary": "A second immutable version was appended",
         "value": {
           "archive": "default",
-          "document_id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-          "version_id": "43d7c2eb-ce46-568b-a7af-fe0b2318af7d",
-          "outcome": "version_created",
-          "default_representation_id": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
-          "representations": [
-            {
-              "representation_id": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
-              "name": "INV-2026-0042.pdf",
-              "content_type": "application/pdf",
-              "metadata": {
-                "role": "human-readable",
-                "language": "nl-BE"
-              },
-              "checksum": {
-                "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
-              },
-              "size": 18432,
-              "state": "available"
-            },
-            {
-              "representation_id": "d6d1ee4b-d769-539c-9766-c3cae71a470a",
-              "name": "INV-2026-0042.xml",
-              "content_type": "application/xml",
-              "metadata": {
-                "role": "structured-invoice",
-                "standard": "UBL-2.1"
-              },
-              "checksum": {
-                "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
-              },
-              "size": 8924,
-              "state": "available"
-            }
-          ],
-          "replayed": false
+          "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+          "version": {
+            "id": "43d7c2eb-ce46-568b-a7af-fe0b2318af7d",
+            "parent": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e"
+          },
+          "outcome": "version_created"
         },
-        "description": "Content sizes and digests remain illustrative; actual values come from the supplied files."
+        "description": "The new snapshot and its stored predecessor are identified without echoing representation metadata. Retrieve details for the complete resource."
       },
       "ArchiveVersionsLastPage": {
         "summary": "Document version history with no continuation",
         "value": {
           "archive": "default",
-          "document_id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+          "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
           "head_version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
           "items": [
             {
               "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
               "archive": "default",
-              "version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
-              "parent_version_id": null,
+              "version": {
+                "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+                "parent": null
+              },
               "document_type": "invoice",
               "metadata": {
                 "invoice_number": "INV-2026-0042",
@@ -20750,57 +22258,69 @@
                 "department": "accounts-receivable",
                 "fiscal_year": 2026
               },
-              "created": "2026-10-14T09:30:00+00:00",
-              "expires": "2036-10-14T09:30:00+00:00",
-              "state": "available",
-              "default_representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-              "representations": [
-                {
-                  "representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-                  "name": "INV-2026-0042.pdf",
-                  "content_type": "application/pdf",
-                  "metadata": {
-                    "role": "human-readable",
-                    "language": "nl-BE"
+              "created_at": "2026-10-14T09:30:00+00:00",
+              "expires_at": "2036-10-14T09:30:00+00:00",
+              "content_availability": "available",
+              "representations": {
+                "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                "items": [
+                  {
+                    "id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                    "name": "INV-2026-0042.pdf",
+                    "metadata": {
+                      "role": "human-readable",
+                      "language": "nl-BE"
+                    },
+                    "content": {
+                      "type": "application/pdf",
+                      "checksum": {
+                        "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
+                      },
+                      "size_bytes": 18432,
+                      "availability": "available"
+                    }
                   },
-                  "checksum": {
-                    "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
-                  },
-                  "size": 18432,
-                  "state": "available"
-                },
-                {
-                  "representation_id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
-                  "name": "INV-2026-0042.xml",
-                  "content_type": "application/xml",
-                  "metadata": {
-                    "role": "structured-invoice",
-                    "standard": "UBL-2.1"
-                  },
-                  "checksum": {
-                    "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
-                  },
-                  "size": 8924,
-                  "state": "available"
-                }
-              ]
+                  {
+                    "id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
+                    "name": "INV-2026-0042.xml",
+                    "metadata": {
+                      "role": "structured-invoice",
+                      "standard": "UBL-2.1"
+                    },
+                    "content": {
+                      "type": "application/xml",
+                      "checksum": {
+                        "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
+                      },
+                      "size_bytes": 8924,
+                      "availability": "available"
+                    }
+                  }
+                ]
+              }
             }
           ],
-          "next_cursor": null
-        }
+          "pagination": {
+            "limit": 50,
+            "next": null
+          }
+        },
+        "description": "Requested with limit=50. Fewer items remain; pagination.limit still reports 50. A null pagination.next ends traversal."
       },
       "ArchiveVersionsFirstPage": {
-        "summary": "Version history page with an opaque cursor",
+        "summary": "Version history batch with an opaque cursor",
         "value": {
           "archive": "default",
-          "document_id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+          "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
           "head_version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
           "items": [
             {
               "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
               "archive": "default",
-              "version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
-              "parent_version_id": null,
+              "version": {
+                "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+                "parent": null
+              },
               "document_type": "invoice",
               "metadata": {
                 "invoice_number": "INV-2026-0042",
@@ -20808,51 +22328,63 @@
                 "department": "accounts-receivable",
                 "fiscal_year": 2026
               },
-              "created": "2026-10-14T09:30:00+00:00",
-              "expires": "2036-10-14T09:30:00+00:00",
-              "state": "available",
-              "default_representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-              "representations": [
-                {
-                  "representation_id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
-                  "name": "INV-2026-0042.pdf",
-                  "content_type": "application/pdf",
-                  "metadata": {
-                    "role": "human-readable",
-                    "language": "nl-BE"
+              "created_at": "2026-10-14T09:30:00+00:00",
+              "expires_at": "2036-10-14T09:30:00+00:00",
+              "content_availability": "available",
+              "representations": {
+                "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                "items": [
+                  {
+                    "id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                    "name": "INV-2026-0042.pdf",
+                    "metadata": {
+                      "role": "human-readable",
+                      "language": "nl-BE"
+                    },
+                    "content": {
+                      "type": "application/pdf",
+                      "checksum": {
+                        "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
+                      },
+                      "size_bytes": 18432,
+                      "availability": "available"
+                    }
                   },
-                  "checksum": {
-                    "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
-                  },
-                  "size": 18432,
-                  "state": "available"
-                },
-                {
-                  "representation_id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
-                  "name": "INV-2026-0042.xml",
-                  "content_type": "application/xml",
-                  "metadata": {
-                    "role": "structured-invoice",
-                    "standard": "UBL-2.1"
-                  },
-                  "checksum": {
-                    "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
-                  },
-                  "size": 8924,
-                  "state": "available"
-                }
-              ]
+                  {
+                    "id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
+                    "name": "INV-2026-0042.xml",
+                    "metadata": {
+                      "role": "structured-invoice",
+                      "standard": "UBL-2.1"
+                    },
+                    "content": {
+                      "type": "application/xml",
+                      "checksum": {
+                        "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
+                      },
+                      "size_bytes": 8924,
+                      "availability": "available"
+                    }
+                  }
+                ]
+              }
             }
           ],
-          "next_cursor": "eyJzY29wZSI6ImFyY2hpdmU6ZGVmYXVsdDpkb2N1bWVudDpjM2JlOTBlMC0yNGFiLTVkMzgtYTM5ZC0zMTQ5ZGI5N2FlMjI6dmVyc2lvbnMiLCJ2YWx1ZXMiOnsiY3JlYXRlZCI6IjIwMjYtMTAtMTRUMDk6MzA6MDArMDA6MDAiLCJ2ZXJzaW9uX2lkIjoiNjUxOGViM2MtYzFlYi01ZjQ5LWExYmYtNjdjOTEzMDhlMzFlIn0sInZlcnNpb24iOjF9"
+          "pagination": {
+            "limit": 1,
+            "next": "eyJzY29wZSI6ImFyY2hpdmU6ZGVmYXVsdDpkb2N1bWVudDpjM2JlOTBlMC0yNGFiLTVkMzgtYTM5ZC0zMTQ5ZGI5N2FlMjI6dmVyc2lvbnMiLCJ2YWx1ZXMiOnsiY3JlYXRlZCI6IjIwMjYtMTAtMTRUMDk6MzA6MDArMDA6MDAiLCJ2ZXJzaW9uX2lkIjoiNjUxOGViM2MtYzFlYi01ZjQ5LWExYmYtNjdjOTEzMDhlMzFlIn0sInZlcnNpb24iOjF9"
+          }
         },
-        "description": "Requested with limit=1; this illustrative history also has older versions not shown in this page."
+        "description": "Requested with limit=1. Pass pagination.next unchanged as the next request's cursor query parameter for this same collection. It is an opaque token, not a URL or page number."
       },
       "ArchiveAmbiguous": {
         "summary": "Two equally ranked PDF representations",
         "value": {
-          "error": "representation selection is ambiguous",
-          "representations": [
+          "error": {
+            "code": "ambiguous_representation",
+            "message": "representation selection is ambiguous"
+          },
+          "representation_ids": [
             "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
             "b826ed5a-77b0-5e66-b82b-cc64bd647096"
           ]
@@ -20862,14 +22394,19 @@
       "ArchiveNotAcceptable": {
         "summary": "The requested media type is not stored",
         "value": {
-          "error": "requested content type is not available"
+          "error": {
+            "code": "not_acceptable",
+            "message": "requested content type is not available"
+          }
         }
       },
       "ArchiveConflict": {
         "summary": "A version identity was reused for different content",
         "value": {
-          "outcome": "version_conflict",
-          "error": "Version identity already exists"
+          "error": {
+            "code": "version_conflict",
+            "message": "Version identity already exists"
+          }
         }
       },
       "UblInvoice": {
@@ -22119,6 +23656,150 @@
         "summary": "Idempotency-Key is required",
         "value": {
           "error": "Idempotency-Key is required"
+        }
+      },
+      "ArchiveChildVersion": {
+        "summary": "A subsequent snapshot with an explicit parent version",
+        "description": "The document id is stable across versions. version.parent identifies the previous snapshot. Sizes and checksums are illustrative.",
+        "value": {
+          "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+          "archive": "default",
+          "version": {
+            "id": "43d7c2eb-ce46-568b-a7af-fe0b2318af7d",
+            "parent": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e"
+          },
+          "document_type": "invoice",
+          "metadata": {
+            "invoice_number": "INV-2026-0042",
+            "customer_id": "CUST-0042",
+            "department": "accounts-receivable",
+            "fiscal_year": 2026,
+            "revision_reason": "Corrected customer postal address"
+          },
+          "created_at": "2026-10-14T11:00:00+00:00",
+          "expires_at": "2036-10-14T09:30:00+00:00",
+          "content_availability": "available",
+          "representations": {
+            "default": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
+            "items": [
+              {
+                "id": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
+                "name": "INV-2026-0042.pdf",
+                "metadata": {
+                  "role": "human-readable",
+                  "language": "nl-BE"
+                },
+                "content": {
+                  "type": "application/pdf",
+                  "checksum": {
+                    "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
+                  },
+                  "size_bytes": 18432,
+                  "availability": "available"
+                }
+              },
+              {
+                "id": "d6d1ee4b-d769-539c-9766-c3cae71a470a",
+                "name": "INV-2026-0042.xml",
+                "metadata": {
+                  "role": "structured-invoice",
+                  "standard": "UBL-2.1"
+                },
+                "content": {
+                  "type": "application/xml",
+                  "checksum": {
+                    "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
+                  },
+                  "size_bytes": 8924,
+                  "availability": "available"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "ArchiveMetadataOnlyVersion": {
+        "summary": "An expired historical version whose bytes have been removed",
+        "description": "Metadata, original sizes and checksums are retained. Byte downloads are unavailable. This is archive content retention, not workflow completion.",
+        "value": {
+          "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+          "archive": "default",
+          "version": {
+            "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+            "parent": null
+          },
+          "document_type": "invoice",
+          "metadata": {
+            "invoice_number": "INV-2026-0042",
+            "customer_id": "CUST-0042",
+            "department": "accounts-receivable",
+            "fiscal_year": 2026
+          },
+          "created_at": "2026-10-14T09:30:00+00:00",
+          "expires_at": "2026-10-14T09:35:00+00:00",
+          "content_availability": "metadata-only",
+          "representations": {
+            "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+            "items": [
+              {
+                "id": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
+                "name": "INV-2026-0042.pdf",
+                "metadata": {
+                  "role": "human-readable",
+                  "language": "nl-BE"
+                },
+                "content": {
+                  "type": "application/pdf",
+                  "checksum": {
+                    "sha512": "5dc4555204defed09efdb517357c2b774e0209767aadc07e8f27ca5022b3e637e765d7f7f4cf4e9d8e9d440865fab5c900f5c532afe6663c57a2aad0fb0d7300"
+                  },
+                  "size_bytes": 18432,
+                  "availability": "metadata-only"
+                }
+              },
+              {
+                "id": "e5fdc2f9-0ac1-5ccb-8e0d-6c613954daa5",
+                "name": "INV-2026-0042.xml",
+                "metadata": {
+                  "role": "structured-invoice",
+                  "standard": "UBL-2.1"
+                },
+                "content": {
+                  "type": "application/xml",
+                  "checksum": {
+                    "sha512": "ebf9474f28210a2467e77237e475fdf2a675edddbaf38f625bbd20c0dc9b44c3b82cc69e141e9a293fbb01d0032470d15afc47ff66ae3b33ed860224e9f7f861"
+                  },
+                  "size_bytes": 8924,
+                  "availability": "metadata-only"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "DocumentTypesEmpty": {
+        "summary": "No document types match this traversal",
+        "description": "A genuine empty result. The effective limit is 50, not zero; next is null.",
+        "value": {
+          "items": [],
+          "pagination": {
+            "limit": 50,
+            "next": null
+          }
+        }
+      },
+      "ArchiveVersionsExhausted": {
+        "summary": "No versions remain after the supplied cursor",
+        "description": "The document and current head remain identified even when the cursor yields an empty batch. pagination.next is null.",
+        "value": {
+          "archive": "default",
+          "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+          "head_version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+          "items": [],
+          "pagination": {
+            "limit": 50,
+            "next": null
+          }
         }
       }
     }

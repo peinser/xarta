@@ -12,6 +12,7 @@ from sanic import response
 from xarta.exceptions.http import InternalServerError
 from xarta.exceptions.http import NotFoundError
 
+from .base import archive_error
 from .base import bp
 from .db import ArchivePostgresModel as DB
 from .db import StorageReference
@@ -106,18 +107,18 @@ async def _retrieve(
     references = await DB.find_sources(archive, document_id, version_id)
     selected = _select_representation(request, references)
     if selected is None:
-        return response.json(
-            {"error": "requested content type is not available"},
-            status=406,
+        return archive_error(
+            406,
+            "not_acceptable",
+            "requested content type is not available",
             headers={"vary": "Accept"},
         )
     if isinstance(selected, tuple):
-        return response.json(
-            {
-                "error": "representation selection is ambiguous",
-                "representations": [str(item.representation_id) for item in selected],
-            },
-            status=300,
+        return archive_error(
+            300,
+            "ambiguous_representation",
+            "representation selection is ambiguous",
+            representation_ids=[str(item.representation_id) for item in selected],
             headers={"vary": "Accept"},
         )
     return await _content_response(request, document_id, selected, negotiated=True)

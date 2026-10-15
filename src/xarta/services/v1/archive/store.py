@@ -22,6 +22,7 @@ from xarta.exceptions.protocol import InvalidDocumentType
 from xarta.protocol.document.type import DocumentTypeIdentifier
 from xarta.protocol.document.type.utils import fetch as fetch_document_type
 
+from .base import archive_error
 from .base import bp
 from .db import ArchiveConflictError
 from .db import ArchivePostgresModel as DB
@@ -57,17 +58,23 @@ class ParsedSnapshotRequest:
 
 
 def _uuid(value: Any, field: str, default: UUID) -> UUID:
+    if value is None:
+        return default
+    if not isinstance(value, str):
+        raise BadRequestError(f"{field} must be a valid UUID string.")
     try:
-        return UUID(str(value)) if value else default
+        return UUID(value)
     except (ValueError, TypeError) as ex:
         raise BadRequestError(f"{field} must be a valid UUID.") from ex
 
 
 def _timestamp(value: Any, field: str) -> datetime.datetime | None:
-    if not value:
+    if value is None:
         return None
+    if not isinstance(value, str):
+        raise BadRequestError(f"{field} must be an ISO 8601 timestamp string.")
     try:
-        result = datetime.datetime.fromisoformat(str(value))
+        result = datetime.datetime.fromisoformat(value)
     except ValueError as ex:
         raise BadRequestError(f"{field} must be an ISO 8601 timestamp.") from ex
     if result.tzinfo is None:
@@ -80,6 +87,17 @@ def _object(value: Any, field: str) -> dict[str, Any]:
         return {}
     if not isinstance(value, dict):
         raise BadRequestError(f"{field} must be a JSON object.")
+    return value
+
+
+def _fields(value: Any, field: str, allowed: set[str]) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise BadRequestError(f"{field} must be a JSON object.")
+    unknown = value.keys() - allowed
+    if unknown:
+        raise BadRequestError(
+            f"Unsupported {field} fields: {', '.join(sorted(unknown))}"
+        )
     return value
 
 
@@ -107,8 +125,23 @@ async def _parse_snapshot(request: Request, archive: str) -> ParsedSnapshotReque
         manifest = orjson.loads(manifest_input)
     except orjson.JSONDecodeError as ex:
         raise BadRequestError("manifest must contain valid JSON.") from ex
-    if not isinstance(manifest, dict):
-        raise BadRequestError("manifest must be a JSON object.")
+    manifest = _fields(
+        manifest,
+        "manifest",
+        {
+            "id",
+            "version",
+            "created_at",
+            "expires_at",
+            "document_type",
+            "metadata",
+            "representations",
+        },
+    )
+    version = _fields(manifest.get("version", {}), "version", {"id", "parent"})
+    representations = _fields(
+        manifest.get("representations", {}), "representations", {"default", "items"}
+    )
 
     registry: ArchiveStorageRegistry = request.app.ctx.archive_storage
     try:
@@ -118,31 +151,33 @@ async def _parse_snapshot(request: Request, archive: str) -> ParsedSnapshotReque
 
     supplied_idempotency = "Idempotency-Key" in request.headers
     idempotency_key = request.headers.get("Idempotency-Key") or str(uuid.uuid4())
-    if supplied_idempotency and not manifest.get("created"):
-        raise BadRequestError("created is required when Idempotency-Key is supplied.")
+    if supplied_idempotency and not manifest.get("created_at"):
+        raise BadRequestError(
+            "created_at is required when Idempotency-Key is supplied."
+        )
     document_id = _uuid(
-        manifest.get("document_id"),
-        "document_id",
+        manifest.get("id"),
+        "id",
         uuid.uuid5(uuid.NAMESPACE_URL, f"{archive}:{idempotency_key}:document"),
     )
     version_id = _uuid(
-        manifest.get("version_id"),
-        "version_id",
+        version.get("id"),
+        "version.id",
         uuid.uuid5(
             uuid.NAMESPACE_URL, f"{archive}:{idempotency_key}:{document_id}:version"
         ),
     )
     parent_id = (
-        _uuid(manifest["parent_version_id"], "parent_version_id", version_id)
-        if manifest.get("parent_version_id")
+        _uuid(version["parent"], "version.parent", version_id)
+        if version.get("parent") is not None
         else None
     )
-    created = _timestamp(manifest.get("created"), "created") or datetime.datetime.now(
-        tz=datetime.UTC
-    )
-    expires = _timestamp(manifest.get("expires"), "expires")
+    created = _timestamp(
+        manifest.get("created_at"), "created_at"
+    ) or datetime.datetime.now(tz=datetime.UTC)
+    expires = _timestamp(manifest.get("expires_at"), "expires_at")
     if expires and expires <= created:
-        raise BadRequestError("expires must be later than created.")
+        raise BadRequestError("expires_at must be later than created_at.")
 
     document_type_value = manifest.get("document_type")
     if document_type_value is not None and not isinstance(document_type_value, str):
@@ -157,19 +192,27 @@ async def _parse_snapshot(request: Request, archive: str) -> ParsedSnapshotReque
         if not expires and configuration.default_retention:
             expires = created + configuration.default_retention
 
-    specifications = manifest.get("representations")
+    specifications = representations.get("items")
     if not isinstance(specifications, list) or not specifications:
-        raise BadRequestError("representations must be a nonempty array.")
+        raise BadRequestError("representations.items must be a nonempty array.")
     parsed = []
     fields: set[str] = set()
     identities: set[UUID] = set()
     for index, specification in enumerate(specifications):
-        if not isinstance(specification, dict):
-            raise BadRequestError(f"representations[{index}] must be a JSON object.")
+        specification = _fields(
+            specification,
+            f"representations.items[{index}]",
+            {"id", "field", "name", "metadata", "content"},
+        )
+        content = _fields(
+            specification.get("content", {}),
+            f"representations.items[{index}].content",
+            {"type"},
+        )
         field_name = specification.get("field")
         if not isinstance(field_name, str) or not field_name:
             raise BadRequestError(
-                f"representations[{index}].field must be a nonempty string."
+                f"representations.items[{index}].field must be a nonempty string."
             )
         if field_name in fields:
             raise BadRequestError("representation multipart fields must be unique.")
@@ -180,12 +223,12 @@ async def _parse_snapshot(request: Request, archive: str) -> ParsedSnapshotReque
                 f"representation manifest references missing multipart field: {field_name}"
             )
         representation_id = _uuid(
-            specification.get("representation_id"),
-            f"representations[{index}].representation_id",
+            specification.get("id"),
+            f"representations.items[{index}].id",
             uuid.uuid5(version_id, f"representation:{index}:{field_name}"),
         )
         if representation_id in identities:
-            raise BadRequestError("representation_id values must be unique.")
+            raise BadRequestError("representation id values must be unique.")
         identities.add(representation_id)
         name = specification.get("name")
         if name is not None and (
@@ -196,11 +239,11 @@ async def _parse_snapshot(request: Request, archive: str) -> ParsedSnapshotReque
             raise BadRequestError(
                 "representation name must be nonempty and contain no control characters."
             )
-        content_type = specification.get("content_type")
+        content_type = content.get("type")
         if not isinstance(content_type, str) or not CONTENT_TYPE.fullmatch(
             content_type
         ):
-            raise BadRequestError("representation content_type is invalid.")
+            raise BadRequestError("representation content.type is invalid.")
         data = uploaded.body
         checksum = hashlib.sha512(data).digest()
         storage_key = f"{archive}/{document_id}/{version_id}/{representation_id}"
@@ -212,7 +255,7 @@ async def _parse_snapshot(request: Request, archive: str) -> ParsedSnapshotReque
                     content_type=content_type,
                     metadata=_object(
                         specification.get("metadata"),
-                        f"representations[{index}].metadata",
+                        f"representations.items[{index}].metadata",
                     ),
                     backend=target.backend_name,
                     backend_revision=target.backend_revision,
@@ -224,15 +267,15 @@ async def _parse_snapshot(request: Request, archive: str) -> ParsedSnapshotReque
             )
         )
 
-    default_input = manifest.get("default_representation_id")
+    default_input = representations.get("default")
     if default_input is None and len(parsed) != 1:
         raise BadRequestError(
-            "default_representation_id is required when several representations are supplied."
+            "representations.default is required when several representations are supplied."
         )
     default_id = (
         parsed[0].write.representation_id
         if default_input is None
-        else _uuid(default_input, "default_representation_id", version_id)
+        else _uuid(default_input, "representations.default", version_id)
     )
     if default_id not in identities:
         raise BadRequestError("default representation does not belong to version.")
@@ -324,12 +367,9 @@ async def _insert(request: Request, archive: str) -> HTTPResponse:
             representation_concurrency=REPRESENTATION_WRITE_CONCURRENCY,
         )
     except ArchiveConflictError as ex:
-        return response.json({"outcome": ex.outcome, "error": str(ex)}, status=409)
+        return archive_error(409, ex.outcome, str(ex))
     except (asyncpg.UniqueViolationError, FileExistsError):
-        return response.json(
-            {"outcome": "version_conflict", "error": "Version identity already exists"},
-            status=409,
-        )
+        return archive_error(409, "version_conflict", "Version identity already exists")
 
     return response.json(
         result.dict(),

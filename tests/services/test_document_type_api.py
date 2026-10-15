@@ -50,7 +50,7 @@ async def test_document_type_collection_is_cursor_paginated(monkeypatch) -> None
             "retention": None,
         },
     }
-    assert payload["next_cursor"] is None
+    assert payload["pagination"] == {"limit": 50, "next": None}
     find_many.assert_awaited_once_with(limit=51, after=None)
 
 
@@ -64,7 +64,7 @@ async def test_document_type_collection_returns_next_cursor(monkeypatch) -> None
     result = await list_document_types(SimpleNamespace(args={"limit": "2"}))
     payload = orjson.loads(result.body)
     cursor = decode_cursor(
-        payload["next_cursor"],
+        payload["pagination"]["next"],
         scope=DOCUMENT_TYPE_CURSOR_SCOPE,
         keys=frozenset({"identifier"}),
     )
@@ -74,6 +74,7 @@ async def test_document_type_collection_returns_next_cursor(monkeypatch) -> None
         "type-001",
     ]
     assert cursor == {"identifier": "type-001"}
+    assert payload["pagination"]["limit"] == 2
 
 
 def test_document_type_serializes_retention_as_iso_duration() -> None:

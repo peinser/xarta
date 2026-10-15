@@ -58,7 +58,10 @@ class FakeSession:
         if url == "http://document-types/api/v1/document-type/":
             return FakeResponse(
                 200,
-                {"items": [{"identifier": "invoice"}], "next_cursor": None},
+                {
+                    "items": [{"identifier": "invoice"}],
+                    "pagination": {"limit": 50, "next": None},
+                },
             )
         if url.endswith("/document-type/invoice/check"):
             return FakeResponse(
@@ -77,10 +80,10 @@ class FakeSession:
                 200,
                 {
                     "archive": "default",
-                    "document_id": "10000000-0000-0000-0000-000000000001",
+                    "id": "10000000-0000-0000-0000-000000000001",
                     "head_version_id": "20000000-0000-0000-0000-000000000002",
                     "items": [],
-                    "next_cursor": None,
+                    "pagination": {"limit": 50, "next": None},
                 },
             )
         if url.endswith("/details"):
@@ -90,20 +93,29 @@ class FakeSession:
                 {
                     "id": "10000000-0000-0000-0000-000000000001",
                     "archive": "default",
-                    "version_id": "20000000-0000-0000-0000-000000000002",
-                    "state": "available",
-                    "default_representation_id": "30000000-0000-0000-0000-000000000003",
-                    "representations": [
-                        {
-                            "representation_id": "30000000-0000-0000-0000-000000000003",
-                            "name": "test.txt",
-                            "content_type": "text/plain",
-                            "metadata": {},
-                            "checksum": {"sha512": hashlib.sha512(content).hexdigest()},
-                            "size": len(content),
-                            "state": "available",
-                        }
-                    ],
+                    "version": {
+                        "id": "20000000-0000-0000-0000-000000000002",
+                        "parent": None,
+                    },
+                    "content_availability": "available",
+                    "representations": {
+                        "default": "30000000-0000-0000-0000-000000000003",
+                        "items": [
+                            {
+                                "id": "30000000-0000-0000-0000-000000000003",
+                                "name": "test.txt",
+                                "metadata": {},
+                                "content": {
+                                    "type": "text/plain",
+                                    "checksum": {
+                                        "sha512": hashlib.sha512(content).hexdigest()
+                                    },
+                                    "size_bytes": len(content),
+                                    "availability": "available",
+                                },
+                            }
+                        ],
+                    },
                 },
             )
         if "/archive/archives/default/documents/" in url:
@@ -147,8 +159,10 @@ class MetadataOnlyArchiveSession(FakeSession):
         response = super().request(method, url, **kwargs)
         if url.endswith("/details"):
             payload = orjson.loads(response.body)
-            payload["state"] = "metadata-only"
-            payload["representations"][0]["state"] = "metadata-only"
+            payload["content_availability"] = "metadata-only"
+            payload["representations"]["items"][0]["content"][
+                "availability"
+            ] = "metadata-only"
             return FakeResponse(200, payload)
         return response
 
