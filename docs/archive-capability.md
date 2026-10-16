@@ -434,16 +434,39 @@ removes them and leaves a tombstone that prevents reuse of the document identity
 ### Storage failure boundary
 
 Representations are written before SQL commit using immutable, conditional writes.
-Filesystem storage publishes with a hard link; S3 uses `If-None-Match: *`. An
-existing object with identical bytes can be adopted on retry. Different bytes at
-the same key are never overwritten.
+Filesystem storage publishes with a hard link; S3 uses `If-None-Match: *`.
+Each parsed snapshot gets a fresh, server-generated allocation UUID. Each physical
+filename ends with `{representation_id}.{allocation_id}` within its backend's key
+layout. A different request cannot adopt that attempt's allocations. A low-level
+retry of the same physical PUT can still recognize identical bytes at that exact
+key; different bytes at the same key are never overwritten.
+
+The allocation UUID is independent of the logical document/version/representation
+IDs and semantic idempotency key. It is excluded from both semantic fingerprints.
+A committed replay is resolved before persistence, so its newly prepared private
+keys do not result in new objects.
+
+Compensation runs after the database transaction has exited and released its lock.
+Attempt-private physical keys prevent a delayed cleanup from deleting content
+another attempt has adopted and committed:
+
+```text
+A writes K_A, then its database transaction rolls back.
+B writes K_B and commits a reference to K_B.
+A compensates by deleting only K_A; K_B remains intact.
+```
 
 If work fails before the transaction body finishes, the service attempts to remove
 objects created by that attempt. A commit error after the transaction body finishes
 is ambiguous: PostgreSQL may already reference the objects, so the service keeps
 them rather than risking data loss. Rollback failures or process crashes can also
-leave orphan objects. Retry with the same identities and stable content; do not
-treat an HTTP timeout as proof that nothing was stored.
+leave orphan objects. Later submissions use new private allocations rather than
+adopting those orphans. Reclaiming unreferenced content is a separate operation
+which must protect in-flight/uncertain writes as well as check committed references;
+the absence of a visible database row alone does not make deletion safe. Retry with the same
+logical identities and stable content; do not treat an HTTP timeout as proof that
+nothing was stored. Private ownership does not make an ambiguous commit safe to
+compensate.
 
 ## Retrieval and document sources
 
@@ -720,8 +743,8 @@ example uses no credentials:
 ```
 
 Filesystem roots must be persistent and accessible to every replica that reads or
-cleans up those objects. The object key is
-`<archive>/<document_id>/<version_id>/<representation_id>` beneath the root.
+cleans up those objects. New filesystem objects use the hardcoded sharded layout
+described below; S3 objects use the logical archive/document/version hierarchy.
 
 For S3, a backend revision uses `kind: "s3"` and requires `bucket`. Optional fields
 are `prefix`, `endpoint_url`, `region_name`, `aws_access_key_id`,
@@ -740,6 +763,180 @@ filesystem storage rooted at `ARCHIVE_STORAGE` (code default `archive`). Policy
 defaults are `versioned`, `retain-all`, `require_current_predecessor: false`, and
 `duplicate_unchanged: true`. Local development intentionally overrides some of
 these defaults; see [Archive development](development/archive.md).
+
+### Hardcoded storage-key policies
+
+Key layout belongs to the backend implementation, not to an archive-specific
+configuration option. All named archives on a backend use that backend's policy:
+
+| Backend | Relative key for a new representation |
+|---|---|
+| Filesystem | `{archive}/{shard_high}/{shard_mid}/{shard_low}/{document_id}-{version_id}-{representation_id}.{allocation_id}` |
+| S3-compatible | `{archive}/{document_id}/{version_id}/{representation_id}.{allocation_id}` |
+
+The three filesystem shard levels are exactly two lowercase hexadecimal characters each:
+
+```python
+shard = zlib.crc32(document_id.bytes) & 0xFFFFFF
+shard_high = f"{shard >> 16:02x}"
+shard_mid = f"{(shard >> 8) & 0xFF:02x}"
+shard_low = f"{shard & 0xFF:02x}"
+```
+
+`UUID.bytes` is the canonical 16-byte, network-order UUID representation. CRC32
+uses the standard-library `zlib.crc32` default initial value, zero. The low 24 bits
+select a directory; they do **not** replace any document, version, or representation
+identity. Filenames contain all three full logical UUIDs plus a private allocation
+suffix, with no media-type extension. `allocation_id` is a fresh UUIDv4 rendered as
+32 lowercase hexadecimal characters, generated once per parsed snapshot. Sharing
+that allocation suffix across its representations is safe because their logical
+representation IDs must be unique. Independent attempts never deliberately reuse
+an allocation suffix.
+
+For example, document `c3be90e0-24ab-5d38-a39d-3149db97ae22` maps to `66/6a/05`:
+
+```text
+invoices/66/6a/05/c3be90e0-24ab-5d38-a39d-3149db97ae22-6518eb3c-c1eb-5f49-a1bf-67c91308e31e-a5f2a8ae-6f5d-59f8-bcff-51e359176286.781c6d4940f34d28bda2d994d12746ab
+```
+
+The suffix is a sibling filename, not a subdirectory below the previous key. An
+existing unsuffixed key may already be a regular file. The three CRC32 shard levels
+are unaffected by allocation identity, so retries stay in the same leaf while
+using different filenames.
+
+#### Why hash the document ID?
+
+Putting every document directly below its archive creates a high-fan-out directory
+and a separate directory for each document and version. In the new layout, three
+shard levels cap each upper directory at 256 child directories and provide
+16,777,216 possible leaf directories per archive, created lazily. Representation
+files go directly in those leaves, avoiding per-document and per-version directories.
+The 24-bit policy targets the expected 200-million-document scale: with one retained
+file per document, uniform distribution means about 12 files per possible leaf.
+Sparse archives can have nearly one occupied leaf per document; the larger shard
+space trades additional directory metadata for smaller leaves at high volume.
+Sharding changes the directory layout, not the number of committed
+representation files. Count retained history, multiple representations, pending
+writes, and orphan allocations when estimating leaf occupancy:
+
+| Physical files per archive | Average per leaf at uniform distribution |
+|---|---:|
+| 100 million | 6.0 |
+| 200 million | 11.9 |
+| 1 billion | 59.6 |
+
+Using the first three UUID bytes directly assumes well-distributed prefixes. That
+works for UUIDv4/v5, but Xarta also accepts caller-supplied UUIDs. UUIDv7 starts
+with a timestamp; documents created around the same time share their leading
+bytes. CRC32 mixes all 16 bytes cheaply instead of relying on a UUID version or
+prefix distribution. A reproducible experiment with one million UUIDv7-shaped IDs
+sharing a timestamp and incrementing their low tail put every raw-prefix key in
+one bucket. The distribution-check command below measures occupied CRC32 buckets
+for that same workload; averages in the table above use all possible buckets.
+
+CRC32 is a fast, non-cryptographic **bucketing** function. Bucket collisions are
+expected and do not cause filename collisions: full identities remain in the
+filename. The existing SHA-512 checksums still verify representation bytes. Do not
+use CRC32 for content integrity, authentication, or adversarial collision resistance.
+Python's built-in `hash()` is not the layout contract: its results are not promised
+stable across runtimes/architectures, and string hashes are process-salted.
+
+All versions and representations of one document share a leaf. This improves
+locality but means exceptionally large per-document histories can still make a
+leaf large. At that ceiling, a future policy can shard by version/representation;
+the persisted-key design below allows new policies without relocating existing
+objects. Distribution is a performance expectation, not a hard per-leaf size bound.
+
+S3 prefixes are object-key namespaces, not filesystem directories. This filesystem
+fan-out problem does not justify hashing S3 keys, so S3 performs no shard hashing.
+
+#### Compute once, persist, and reuse
+
+For **both** backends, `archive_document_representations` stores the completed
+`storage_key`, `backend`, and `backend_revision`. The database key is relative to
+the configured location:
+
+- Filesystem: `{root}/{storage_key}`.
+- S3: bucket `{bucket}`, object key `{prefix}/{storage_key}` (or just `storage_key`
+  when no prefix is configured).
+
+Root, bucket, and prefix are resolved through the pinned backend revision; they
+are not copied into every row. Never repoint an existing revision to a different
+location while objects still reference it. Completed content deletion clears
+`storage_key` when the representation becomes metadata-only.
+
+The write parser requests one backend key prefix **per submitted snapshot**, outside
+the representation loop. Filesystem sharding therefore hashes only 16 bytes once,
+regardless of representation count or file sizes. It generates one private
+allocation UUID, appends each representation UUID and that allocation suffix, and
+persists each complete key. It does not hash uploaded content for sharding,
+maintain a global UUID cache, or add a database lookup for shard selection.
+
+Reads, conditional writes, retries inside storage, rollback, and deletion consume
+the supplied/stored key verbatim; they do not regenerate it or recalculate a shard.
+Existing recorded hierarchical and two-level-sharded filesystem keys resolve through the
+same root-and-key lookup. New writes use the sharded policy without a data migration
+or special old-key branch. Changing a policy does not move existing objects;
+an existing high-fan-out directory tree would require a separate relocation or
+cleanup operation to compact it. New writes no longer add per-document directories.
+Unreferenced orphan files from an interrupted older write remain an operational
+cleanup concern, as before.
+
+#### Measured CPU cost
+
+Illustrative local measurements on Python 3.13.7, Darwin arm64: median of seven
+repeats of 300,000 operations, after imports. These measure CPU-only key work,
+not filesystem, database, network, or complete-request throughput.
+
+| Operation | Time per operation |
+|---|---:|
+| CRC32 of an existing 16-byte value | ~50 ns |
+| SHA-256 of an existing 16-byte value | ~290 ns |
+| BLAKE2s of an existing 16-byte value | ~257 ns |
+| UUID byte extraction + CRC32 + 24-bit selection | ~133 ns |
+| Implemented three-level filesystem prefix, including UUID/shard formatting | ~1.67 µs |
+| Implemented S3 prefix, including UUID formatting | ~1.10 µs |
+| Fresh private allocation UUIDv4 in hex, once per snapshot | ~1.94 µs |
+
+Prefix timings exclude the private allocation UUID and per-representation suffix
+concatenation. The safety nonce is generated once per snapshot, not once per file.
+Formatting dominates complete-prefix cost; the faster hash is not a proportional
+speedup of the whole write path. There is no sharding-hash or allocation-UUID cost
+on reads or deletion.
+Reproduce the relevant operations on the deployment's own Python/CPU with:
+
+```sh
+uv run --frozen python - <<'PY'
+from statistics import median
+from timeit import repeat
+from uuid import UUID, uuid4
+from zlib import crc32
+from xarta.services.v1.archive.storage import FilesystemStorageBackend, S3StorageBackend
+
+document = UUID("c3be90e0-24ab-5d38-a39d-3149db97ae22")
+version = UUID("6518eb3c-c1eb-5f49-a1bf-67c91308e31e")
+for statement in (
+    "crc32(document.bytes) & 0xffffff",
+    "uuid4().hex",
+    "FilesystemStorageBackend.representation_key_prefix('invoices', document, version)",
+    "S3StorageBackend.representation_key_prefix('invoices', document, version)",
+):
+    timings = repeat(statement, globals=globals(), number=300_000, repeat=7)
+    print(statement, median(timings) / 300_000 * 1e9, "ns/op")
+PY
+```
+
+The fixed-prefix distribution experiment is also independent of storage I/O:
+
+```python
+from collections import Counter
+from uuid import UUID
+from zlib import crc32
+
+base = int("0199aabbccdd70008000000000000000", 16)
+buckets = Counter(crc32(UUID(int=base + n).bytes) & 0xFFFFFF for n in range(1_000_000))
+print(len(buckets), min(buckets.values()), max(buckets.values()))
+```
 
 ### Database and dependencies
 

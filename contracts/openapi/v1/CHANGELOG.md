@@ -1,5 +1,14 @@
 # HTTP API v1 contract revisions
 
+## 5.0.1 — 2026-10-16
+
+- Fix archive compensation ownership: independent submissions use private physical
+  allocations, so delayed cleanup after a database rollback cannot remove content
+  adopted and committed by a concurrent retry. Filesystem keys retain CRC32 shards.
+- Document the failure boundary and remaining orphan-reclamation limitation.
+  Logical IDs, semantic fingerprints, idempotency keys, HTTP response shapes, and
+  status codes remain unchanged. A committed replay does not persist new objects.
+
 ## 5.0.0 — 2026-10-15
 
 - Group cursor continuation as `pagination: {limit, next}` in archive version and

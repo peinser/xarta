@@ -195,6 +195,13 @@ async def _parse_snapshot(request: Request, archive: str) -> ParsedSnapshotReque
     specifications = representations.get("items")
     if not isinstance(specifications, list) or not specifications:
         raise BadRequestError("representations.items must be a nonempty array.")
+    key_prefix = target.backend.representation_key_prefix(
+        archive, document_id, version_id
+    )
+    # Compensation runs after the database lock is released. Private allocation
+    # keys prevent a retry from adopting an object that this attempt may delete.
+    # One nonce per snapshot is enough: representation IDs distinguish its files.
+    allocation_id = uuid.uuid4().hex
     parsed = []
     fields: set[str] = set()
     identities: set[UUID] = set()
@@ -246,7 +253,7 @@ async def _parse_snapshot(request: Request, archive: str) -> ParsedSnapshotReque
             raise BadRequestError("representation content.type is invalid.")
         data = uploaded.body
         checksum = hashlib.sha512(data).digest()
-        storage_key = f"{archive}/{document_id}/{version_id}/{representation_id}"
+        storage_key = f"{key_prefix}{representation_id}.{allocation_id}"
         parsed.append(
             ParsedRepresentation(
                 write=RepresentationWrite(

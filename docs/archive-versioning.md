@@ -188,8 +188,14 @@ while their representations exist.
 Aggregate row locking serializes `HEAD` advancement. Exact idempotency replay returns the
 recorded write result in the current response format; reuse of an idempotency key or requested version with different semantics
 returns `version_conflict`. Representation objects are written conditionally before SQL
-commit. SQL failure rolls them back; a retry may adopt an identical orphan but never
-overwrite different bytes.
+commit. Every parsed snapshot allocates a fresh UUIDv4 suffix on its physical
+representation keys, using the same backend prefix/CRC32 shard policy. Logical
+identities and semantic fingerprints stay deterministic. SQL failure can compensate
+after releasing its lock without deleting a concurrent retry's independent objects.
+Committed replays skip object persistence. Cross-attempt orphan adoption is not
+performed; uncertain commits and failed cleanup may leave objects for separate,
+reference-aware reclamation. The same physical PUT can still be retried conditionally
+without overwriting different bytes.
 
 Deletion and history cleanup fan out one durable command per available representation.
 Commands pin aggregate, version, representation, backend revision, and storage key. Missing

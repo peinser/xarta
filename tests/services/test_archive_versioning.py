@@ -6,7 +6,10 @@ import hashlib
 import os
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from unittest.mock import patch
+from uuid import UUID
 from uuid import uuid4
 
 import orjson
@@ -23,6 +26,7 @@ from xarta.services.v1.archive.storage import ArchiveStorageRegistry
 from xarta.services.v1.archive.storage import ArchiveStorageSessions
 from xarta.services.v1.archive.storage import FilesystemStorageBackend
 from xarta.services.v1.archive.storage import S3StorageBackend
+from xarta.services.v1.archive.store import _parse_snapshot
 
 
 class AsyncContext:
@@ -195,6 +199,179 @@ async def test_complete_snapshot_persists_every_representation_before_sealing(
     ) < queries.index(
         next(query for query in queries if "SET head_version_id" in query)
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend_kind", ["filesystem", "s3"])
+async def test_failed_write_cleanup_cannot_delete_committed_retry(
+    monkeypatch, tmp_path, backend_kind
+) -> None:
+    if backend_kind == "filesystem":
+        backend = FilesystemStorageBackend(os.fspath(tmp_path))
+    else:
+        objects = {}
+
+        async def put_object(**kwargs):
+            key = kwargs["Key"]
+            if key in objects:
+                raise ClientError(
+                    {
+                        "ResponseMetadata": {"HTTPStatusCode": 412},
+                        "Error": {"Code": "PreconditionFailed"},
+                    },
+                    "PutObject",
+                )
+            objects[key] = kwargs["Body"]
+
+        async def get_object(**kwargs):
+            key = kwargs["Key"]
+            if key not in objects:
+                raise ClientError(
+                    {
+                        "ResponseMetadata": {"HTTPStatusCode": 404},
+                        "Error": {"Code": "NoSuchKey"},
+                    },
+                    "GetObject",
+                )
+            return {
+                "Body": AsyncContext(
+                    SimpleNamespace(read=AsyncMock(return_value=objects[key]))
+                )
+            }
+
+        async def delete_object(**kwargs):
+            objects.pop(kwargs["Key"], None)
+
+        backend = S3StorageBackend({"bucket": "archive", "prefix": "xarta"})
+        backend._client_manager = SimpleNamespace(
+            get=AsyncMock(
+                return_value=SimpleNamespace(
+                    put_object=put_object,
+                    get_object=get_object,
+                    delete_object=delete_object,
+                )
+            )
+        )
+
+    target = SimpleNamespace(
+        backend=backend, backend_name="primary", backend_revision="v1"
+    )
+    data = b"invoice bytes"
+    request = SimpleNamespace(
+        form={
+            "manifest": orjson.dumps(
+                {
+                    "created_at": "2030-01-01T00:00:00+00:00",
+                    "metadata": {"invoice_number": "INV-2030-0042"},
+                    "representations": {
+                        "items": [
+                            {"field": "invoice", "content": {"type": "text/plain"}}
+                        ]
+                    },
+                }
+            )
+        },
+        files={"invoice": SimpleNamespace(body=data)},
+        headers={"Idempotency-Key": "cleanup-race-0042"},
+        app=SimpleNamespace(
+            ctx=SimpleNamespace(
+                archive_storage=SimpleNamespace(resolve=lambda _: target)
+            )
+        ),
+    )
+    first = (await _parse_snapshot(request, "default")).write
+    second = (await _parse_snapshot(request, "default")).write
+    assert first.document_id == second.document_id
+    assert first.version_id == second.version_id
+    assert first.fingerprint == second.fingerprint
+    assert first.snapshot_fingerprint == second.snapshot_fingerprint
+    assert first.idempotency_key == second.idempotency_key
+
+    async def persist(item):
+        return await backend.put(item.storage_key, data, item.content_type)
+
+    cleanup_started = asyncio.Event()
+    allow_cleanup = asyncio.Event()
+
+    async def delayed_cleanup(item):
+        cleanup_started.set()
+        await allow_cleanup.wait()
+        await backend.delete(item.storage_key)
+
+    failed_connection = Connection()
+    failed_connection.insert_error = RuntimeError("database write failed")
+    install(monkeypatch, failed_connection)
+    attempt = asyncio.create_task(
+        ArchivePostgresModel.prepare_version(
+            first,
+            ArchivePolicy(),
+            persist,
+            delayed_cleanup,
+        )
+    )
+    try:
+        # A has left its failed transaction, but compensation has not deleted bytes.
+        await asyncio.wait_for(cleanup_started.wait(), timeout=5)
+        committed_connection = Connection()
+        install(monkeypatch, committed_connection)
+        result = await ArchivePostgresModel.prepare_version(
+            second, ArchivePolicy(), persist, AsyncMock()
+        )
+        assert result.outcome == "created"
+        inserted = next(
+            rows
+            for query, rows in committed_connection.executed
+            if "INSERT INTO archive_document_representations" in query
+        )
+        committed_key = inserted[0][7]  # storage_key column in the actual INSERT.
+    finally:
+        # B has committed its reference before A is allowed to compensate.
+        allow_cleanup.set()
+        with pytest.raises(RuntimeError, match="database write failed"):
+            await asyncio.wait_for(attempt, timeout=5)
+
+    assert await backend.get(committed_key) == data
+    with pytest.raises(FileNotFoundError):
+        await backend.get(first.representations[0].storage_key)
+
+    recorded = next(
+        arguments[-1]
+        for query, arguments in committed_connection.executed
+        if "INSERT INTO archive_idempotency" in query
+    )
+    replay_connection = Connection()
+    original_fetchrow = replay_connection.fetchrow
+
+    async def fetch_recorded_result(query, *args):
+        if "FROM archive_idempotency" in query:
+            return {
+                "request_fingerprint": second.fingerprint,
+                "response": recorded,
+                "parent_version_id": None,
+            }
+        if "SELECT aggregate._id AS aggregate_id" in query:
+            return {
+                "aggregate_id": 1,
+                "version_internal_id": 20,
+                "parent_version_id": None,
+                "metadata": second.metadata,
+                "document_type": second.document_type,
+                "created": second.created,
+            }
+        return await original_fetchrow(query, *args)
+
+    monkeypatch.setattr(replay_connection, "fetchrow", fetch_recorded_result)
+    install(monkeypatch, replay_connection)
+    third = (await _parse_snapshot(request, "default")).write
+    replay_persist = AsyncMock()
+    replay = await ArchivePostgresModel.prepare_version(
+        third, ArchivePolicy(), replay_persist, AsyncMock()
+    )
+    assert replay.replayed
+    assert replay.dict() == result.dict()
+    replay_persist.assert_not_awaited()
+    with pytest.raises(FileNotFoundError):
+        await backend.get(third.representations[0].storage_key)
 
 
 @pytest.mark.asyncio
@@ -380,16 +557,33 @@ async def test_head_parent_and_write_policy_conflicts(
 @pytest.mark.asyncio
 async def test_filesystem_backend_never_overwrites(tmp_path) -> None:
     backend = FilesystemStorageBackend(os.fspath(tmp_path))
-    await backend.put(
-        "archive/document/version/representation", b"first", "application/pdf"
+    document = UUID("c3be90e0-24ab-5d38-a39d-3149db97ae22")
+    version = UUID("6518eb3c-c1eb-5f49-a1bf-67c91308e31e")
+    representation = UUID("a5f2a8ae-6f5d-59f8-bcff-51e359176286")
+    prefix = backend.representation_key_prefix("invoices", document, version)
+    assert prefix == f"invoices/66/6a/05/{document}-{version}-"
+    # Both recorded historical keys and new sharded keys are opaque to storage I/O.
+    keys = (
+        "archive/document/version/representation",
+        f"invoices/6a/05/{document}-{version}-{representation}.{uuid4().hex}",
+        f"{prefix}{representation}",
+        f"{prefix}{representation}.{uuid4().hex}",
     )
-    await backend.put(
-        "archive/document/version/representation", b"first", "application/pdf"
-    )
-    with pytest.raises(FileExistsError):
-        await backend.put(
-            "archive/document/version/representation", b"second", "application/pdf"
-        )
+    with patch(
+        "xarta.services.v1.archive.storage.crc32",
+        side_effect=AssertionError("Storage I/O must not recalculate shards"),
+    ):
+        for key in keys:
+            assert await backend.put(key, b"first", "application/pdf") is True
+            assert await backend.put(key, b"first", "application/pdf") is False
+            with pytest.raises(FileExistsError):
+                await backend.put(key, b"second", "application/pdf")
+            assert await backend.get(key) == b"first"
+            assert (tmp_path / key).read_bytes() == b"first"
+        for key in keys:
+            await backend.delete(key)
+            await backend.delete(key)
+            assert not (tmp_path / key).exists()
 
 
 def test_archive_schema_is_representation_aware_and_immutable() -> None:
@@ -454,11 +648,21 @@ async def test_s3_backend_uses_conditional_put_for_representation_key() -> None:
             return Client()
 
     backend._client_manager = Manager()  # type: ignore[assignment]
-    await backend.put(
-        "payroll/document/version/representation", b"pdf", "application/pdf"
-    )
+    document, version, representation = uuid4(), uuid4(), uuid4()
+    allocation = uuid4().hex
+    with patch(
+        "xarta.services.v1.archive.storage.crc32",
+        side_effect=AssertionError("S3 must not calculate filesystem shards"),
+    ):
+        key = (
+            backend.representation_key_prefix("payroll", document, version)
+            + str(representation)
+            + f".{allocation}"
+        )
+        assert key == f"payroll/{document}/{version}/{representation}.{allocation}"
+        await backend.put(key, b"pdf", "application/pdf")
     assert calls[0]["IfNoneMatch"] == "*"
-    assert calls[0]["Key"] == "xarta/payroll/document/version/representation"
+    assert calls[0]["Key"] == f"xarta/{key}"
 
 
 @pytest.mark.asyncio

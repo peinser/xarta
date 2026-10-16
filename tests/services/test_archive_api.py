@@ -5,6 +5,7 @@ import hashlib
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from unittest.mock import patch
 from uuid import UUID
 from uuid import uuid4
 
@@ -29,6 +30,7 @@ from xarta.services.v1.archive.download import _content_disposition
 from xarta.services.v1.archive.download import _retrieve
 from xarta.services.v1.archive.download import _retrieve_exact
 from xarta.services.v1.archive.download import _select_representation
+from xarta.services.v1.archive.storage import FilesystemStorageBackend
 from xarta.services.v1.archive.store import _parse_snapshot
 
 
@@ -86,6 +88,7 @@ def snapshot_request(manifest: dict, files: dict[str, bytes]):
     target = SimpleNamespace(
         backend_name="primary",
         backend_revision="v1",
+        backend=FilesystemStorageBackend("archive"),
     )
     return Request(
         files={name: SimpleNamespace(body=data) for name, data in files.items()},
@@ -145,8 +148,39 @@ async def test_manifest_parses_separate_version_and_representation_metadata() ->
         },
         {"pdf": b"pdf", "xml": b"xml"},
     )
+    request.headers["Idempotency-Key"] = "invoice-snapshot-0042"
 
-    parsed = await _parse_snapshot(request, "payroll")
+    with patch.object(
+        FilesystemStorageBackend,
+        "representation_key_prefix",
+        wraps=FilesystemStorageBackend.representation_key_prefix,
+    ) as key_prefix:
+        parsed = await _parse_snapshot(request, "payroll")
+    key_prefix.assert_called_once_with("payroll", document_id, version_id)
+    expected_prefix = FilesystemStorageBackend.representation_key_prefix(
+        "payroll", document_id, version_id
+    )
+    allocation_ids = set()
+    for item in parsed.representations:
+        stem, allocation_id = item.write.storage_key.rsplit(".", 1)
+        assert stem == f"{expected_prefix}{item.write.representation_id}"
+        assert len(allocation_id) == 32
+        assert UUID(allocation_id).version == 4
+        allocation_ids.add(allocation_id)
+    assert len(allocation_ids) == 1
+
+    retry = await _parse_snapshot(request, "payroll")
+    assert retry.write.document_id == parsed.write.document_id
+    assert retry.write.version_id == parsed.write.version_id
+    assert retry.write.idempotency_key == parsed.write.idempotency_key
+    assert retry.write.fingerprint == parsed.write.fingerprint
+    assert retry.write.snapshot_fingerprint == parsed.write.snapshot_fingerprint
+    assert [item.representation_id for item in retry.write.representations] == [
+        item.representation_id for item in parsed.write.representations
+    ]
+    assert {item.storage_key for item in retry.write.representations}.isdisjoint(
+        item.storage_key for item in parsed.write.representations
+    )
 
     assert parsed.write.metadata == {"invoice_number": "2026-0042"}
     assert parsed.write.default_representation_id == pdf_id

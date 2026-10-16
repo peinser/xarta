@@ -3,7 +3,7 @@
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "info": {
     "title": "Xarta HTTP and Workflow Capabilities API",
-    "version": "5.0.0",
+    "version": "5.0.1",
     "summary": "Contracts for all implemented Xarta v1 HTTP services and intake workflow nodes.",
     "description": "The union of independently deployable services. A deployment may expose only a subset; discover enabled workflow kinds at /api/v1/intake/capabilities. HTTP acceptance does not imply workflow completion. Canonical API paths are version-pinned; x-path-alias records the floating /api alias. Security requirements describe service-level enforcement only; ingress authorization is deployment-specific. NATS and MCP are separate protocols, not REST operations. See contracts/openapi/README.md for versioning and maintenance. Named examples use synthetic invoice/customer identities and reserved example domains. Unless explicitly tied to repository configuration or vendored UBL fixtures, destinations, templates, policies, provider references, timestamps, hashes and credentials are illustrative. Binary uploads/downloads use file-oriented x-codeSamples rather than fake JSON bytes. See contracts/openapi/README.md for the example scenarios and prerequisites.",
     "license": {
@@ -1852,7 +1852,7 @@
           },
           "description": "manifest is a JSON-encoded form string, not an uploaded file. Other parts are binary files named by manifest.representations.items[].field."
         },
-        "description": "Unscoped routes use archive=default. Returns 201 for a newly created document/version, 200 for replay or an existing equivalent snapshot. Different content under a reused identity conflicts.",
+        "description": "Unscoped routes use archive=default. Returns 201 for a newly created document/version, 200 for replay or an existing equivalent snapshot. Different content under a reused identity conflicts. Physical allocations are private to each submission so failed-write compensation cannot delete a concurrent retry's allocation. Logical identities and semantic idempotency remain stable; committed replays are resolved before object persistence. Crashes or uncertain commits can still leave unreferenced content for separate cleanup.",
         "x-codeSamples": [
           {
             "lang": "Shell",
@@ -3410,7 +3410,7 @@
           },
           "description": "manifest is a JSON-encoded form string, not an uploaded file. Other parts are binary files named by manifest.representations.items[].field."
         },
-        "description": "Unscoped routes use archive=default. Returns 201 for a newly created document/version, 200 for replay or an existing equivalent snapshot. Different content under a reused identity conflicts.",
+        "description": "Unscoped routes use archive=default. Returns 201 for a newly created document/version, 200 for replay or an existing equivalent snapshot. Different content under a reused identity conflicts. Physical allocations are private to each submission so failed-write compensation cannot delete a concurrent retry's allocation. Logical identities and semantic idempotency remain stable; committed replays are resolved before object persistence. Crashes or uncertain commits can still leave unreferenced content for separate cleanup.",
         "x-codeSamples": [
           {
             "lang": "Shell",

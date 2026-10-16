@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 from typing import Protocol
+from zlib import crc32
 
 import aiofiles  # type: ignore[import-untyped]
 import aiofiles.os  # type: ignore[import-untyped]
@@ -18,6 +19,16 @@ from xarta.storage.s3 import S3ClientManager
 
 
 class StorageBackend(Protocol):
+    def representation_key_prefix(
+        self, archive: str, document_id: uuid.UUID, version_id: uuid.UUID
+    ) -> str:
+        """Return the prefix for a representation UUID and private allocation suffix.
+
+        Called once when preparing a snapshot. Persist completed keys; reads and
+        deletion use those exact keys rather than regenerating them.
+        """
+        ...
+
     async def put(self, key: str, data: bytes, content_type: str) -> bool:
         """Store immutable bytes and return whether this call created them.
 
@@ -33,6 +44,20 @@ class StorageBackend(Protocol):
 class FilesystemStorageBackend:
     def __init__(self, root: str) -> None:
         self.root = os.path.abspath(root)
+
+    @staticmethod
+    def representation_key_prefix(
+        archive: str, document_id: uuid.UUID, version_id: uuid.UUID
+    ) -> str:
+        # CRC32 of the 16 UUID bytes mixes time-ordered prefixes cheaply. The low
+        # 24 bits select directories only; filenames retain the logical identities.
+        # Ponytail: a document's versions share a leaf. Shard by representation
+        # if unusually large per-document histories make that leaf too large.
+        shard = crc32(document_id.bytes) & 0xFFFFFF
+        return (
+            f"{archive}/{shard >> 16:02x}/{(shard >> 8) & 0xFF:02x}/"
+            f"{shard & 0xFF:02x}/{document_id}-{version_id}-"
+        )
 
     def _path(self, key: str) -> str:
         path = os.path.abspath(os.path.join(self.root, key))
@@ -97,6 +122,13 @@ class ArchiveStorageSessions:
 
 
 class S3StorageBackend:
+    @staticmethod
+    def representation_key_prefix(
+        archive: str, document_id: uuid.UUID, version_id: uuid.UUID
+    ) -> str:
+        # Object-key prefixes are not filesystem directories; no shard is needed.
+        return f"{archive}/{document_id}/{version_id}/"
+
     def __init__(
         self,
         configuration: Mapping[str, Any],

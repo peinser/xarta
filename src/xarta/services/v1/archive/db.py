@@ -327,6 +327,11 @@ class ArchivePostgresModel(SanicPostgresModel):
         rollback: Callable[[RepresentationWrite], Awaitable[None]],
         representation_concurrency: int = 1,
     ) -> VersionResult:
+        """Store a snapshot with physical allocation keys private to this attempt.
+
+        Independent attempts must not reuse those keys: compensation can run after
+        the transaction has released its lock. Logical identities may be reused.
+        """
         created_storage: list[RepresentationWrite] = []
         transaction_ready = False
 

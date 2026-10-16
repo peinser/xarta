@@ -35,3 +35,26 @@ PostgreSQL and object or filesystem storage are separate transactional resources
 Durable deletion jobs and reconciliation recover known deletion work, but correctness
 still depends on storage idempotency and operator monitoring when the storage backend is
 unavailable for an extended period.
+
+Each archive write attempt uses private physical allocations so delayed rollback
+cleanup cannot delete a concurrent retry's committed content. A process crash,
+uncertain commit, lost storage response, or cleanup failure can still leave orphan
+allocations. Subsequent requests use fresh keys rather than adopting those objects;
+orphan reclamation must protect in-flight/uncertain writes as well as check
+committed database references before deleting bytes. A missing visible row alone
+is not sufficient evidence that an allocation is safe to delete.
+
+## Authoritative archive metadata search — planned scope
+
+The metadata-search API is under design and is not implemented yet. Its initial
+scope is deliberately limited:
+
+- Only the current HEAD version of each logical document will be searched.
+  Historical version metadata will not be searched, even when an older version
+  would match a filter that the current HEAD does not.
+- Only logical document metadata, as stored on the HEAD version, will be searchable.
+  Representation metadata will not participate in matching.
+
+The intended source is the authoritative archive database, covering archived
+documents without requiring an explicit `search-index` workflow step. This is
+separate from the existing optional search-index projections.
