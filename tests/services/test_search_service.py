@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 
 from contextlib import AbstractAsyncContextManager
@@ -11,6 +12,7 @@ import orjson
 import pytest
 
 from xarta.adapters import AdapterRegistry
+from xarta.exceptions.protocol import ArchiveDocumentNotFound
 from xarta.exceptions.protocol import TemporaryError
 from xarta.protocol.dag import NodeTask
 from xarta.protocol.dag.search import SearchIndexNode
@@ -511,6 +513,184 @@ async def test_archive_removal_events_are_idempotent(event_type, expected) -> No
     await _archive_lifecycle_worker(msg=message, components=components)
 
     assert [operation[0] for operation in factory.lifecycle] == [expected, expected]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["postgresql", "elasticsearch"])
+@pytest.mark.parametrize(
+    "delete_before_write", [False, True], ids=["ordered-control", "late-index-race"]
+)
+async def test_archive_deletion_and_inflight_index_ordering(
+    monkeypatch, backend, delete_before_write
+) -> None:
+    """Characterize the known race, not the desired convergence guarantee.
+
+    Workers and adapters are real; archive state, SQL storage, and HTTP storage
+    are doubles. Change the late-write expectation when convergence is fixed.
+    """
+    records = {}
+    operations = []
+    document = searchable()
+    document_id = document.source.document_id
+    late_version_id = uuid4()
+    archive_deleted = False
+
+    class Connection(FakeConnection):
+        async def fetchval(self, query, *args):
+            assert "INSERT INTO public.search_documents" in query
+            records[str(args[0])] = {
+                "namespace": args[1],
+                "source_kind": args[3],
+                "source_archive": args[4],
+                "source_document_id": str(args[5]),
+                "source_version_id": str(args[6]),
+            }
+            operations.append("index")
+            return args[0]
+
+        async def execute(self, query, *args):
+            assert "DELETE FROM public.search_documents" in query
+            for key, record in list(records.items()):
+                if (
+                    record["namespace"] == args[0]
+                    and record["source_kind"] == "archive"
+                    and record["source_archive"] == args[1]
+                    and record["source_document_id"] == str(args[2])
+                ):
+                    del records[key]
+            operations.append("delete")
+
+    class Session:
+        def put(self, url, **kwargs):
+            assert "/_create/" in url
+            key = url.rsplit("/", 1)[-1]
+            assert key not in records
+            records[key] = orjson.loads(kwargs["data"])
+            operations.append("index")
+            return AsyncContext(SimpleNamespace(status=201))
+
+        def post(self, url, **kwargs):
+            assert "/_delete_by_query" in url
+            filters = orjson.loads(kwargs["data"])["query"]["bool"]["filter"]
+            for key, record in list(records.items()):
+                if all(
+                    record.get(field.removesuffix(".keyword")) == value
+                    for item in filters
+                    for field, value in item["term"].items()
+                ):
+                    del records[key]
+            operations.append("delete")
+            return AsyncContext(SimpleNamespace(status=200))
+
+    if backend == "postgresql":
+        adapter = PostgreSQLSearchAdapter(
+            FakePool(Connection()), {"namespace": "documents"}
+        )
+    else:
+        adapter = ElasticsearchSearchAdapter(
+            Session(),
+            {"endpoint": "http://search:9200", "index": "documents"},
+        )
+    # An older projection proves that the deletion handler really removes data.
+    await adapter.index(idempotency_key=str(uuid4()), document=document)
+    assert len(records) == 1
+    operations.clear()
+    components = build_search_components(
+        {"documents": revisioned(configuration())},
+        AdapterRegistry(
+            {
+                "fake-search": SimpleNamespace(
+                    validate=lambda _configuration: None,
+                    create=lambda _configuration: adapter,
+                )
+            }
+        ),
+    )
+
+    async def archive_details(**kwargs):
+        if archive_deleted:
+            raise ArchiveDocumentNotFound(str(document_id))
+        operations.append("read")
+        return ArchiveDocumentVersion(
+            identifier=document_id,
+            version_id=late_version_id,
+            default_representation_id=document.default_representation_id,
+            representations=tuple(
+                ArchiveRepresentation(
+                    representation_id=item.representation_id,
+                    content_type=item.content_type,
+                )
+                for item in document.representations
+            ),
+            document_type=SimpleNamespace(value="invoice"),
+            metadata={"customer": "123"},
+        )
+
+    details = AsyncMock(side_effect=archive_details)
+    monkeypatch.setattr(ArchiveDocumentSource, "_details", details)
+    node = SearchIndexNode(
+        document={
+            "source": "archive",
+            "archive": "payroll",
+            "id": str(document_id),
+            "version": str(late_version_id),
+        },
+        destination="documents",
+    )
+    ready, resume = asyncio.Event(), asyncio.Event()
+    index = adapter.index
+
+    async def paused_index(**kwargs):
+        ready.set()
+        await resume.wait()
+        return await index(**kwargs)
+
+    monkeypatch.setattr(adapter, "index", paused_index)
+    task = asyncio.create_task(
+        _worker(
+            node,
+            NodeTask(flow_id=uuid4(), node=node),
+            components=components,
+        )
+    )
+    deleted = archive_event(
+        "xarta.archive.document.deleted", document_id, late_version_id
+    )
+    try:
+        async with asyncio.timeout(5):
+            await ready.wait()
+            details.assert_awaited_once()
+            assert operations == ["read"]
+            if delete_before_write:
+                archive_deleted = True
+                await _archive_lifecycle_worker(msg=deleted, components=components)
+                assert records == {}
+            resume.set()
+            result = await task
+            if not delete_before_write:
+                archive_deleted = True
+                await _archive_lifecycle_worker(msg=deleted, components=components)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    details.assert_awaited_once()  # The worker never revalidated its cached snapshot.
+    assert [outcome.outcome for outcome in result.outcomes] == ["indexed"]
+    assert operations == (
+        ["read", "delete", "index"]
+        if delete_before_write
+        else ["read", "index", "delete"]
+    )
+    if delete_before_write:
+        # Known defect: successful deletion is followed by a successful stale write.
+        assert len(records) == 1
+        record = next(iter(records.values()))
+        assert record["source_document_id"] == str(document_id)
+        assert record["source_version_id"] == str(late_version_id)
+    else:
+        assert records == {}
+    with pytest.raises(ArchiveDocumentNotFound):
+        await ArchiveDocumentSource(document_id, archive="payroll").details()
 
 
 @pytest.mark.asyncio

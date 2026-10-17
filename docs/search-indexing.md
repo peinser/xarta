@@ -130,3 +130,22 @@ document. These operations are idempotent and archive-scoped.
 
 Archive remains the authoritative content and metadata store; search is a disposable
 projection and must not be used as an archive.
+
+### Known limitation: indexing can overlap deletion
+
+The indexing worker reads archive metadata before writing its projection. An in-flight
+index operation can therefore finish after the deletion-event consumer has removed the
+document's projections, recreating a stale search entry. Both the PostgreSQL and
+Elasticsearch adapters permit this ordering, even when the deleted event was delivered
+and processed successfully.
+
+This is an accepted limitation. Its frequency has not been measured. There is no
+automatic reconciliation or guaranteed later notification to remove the recreated entry,
+so it can remain indefinitely until explicit projection cleanup or a rebuild that removes
+stale entries. Merely indexing current documents again does not remove stale entries.
+Search results are not proof that an archived document still exists; archive reads remain
+authoritative and may report it as unavailable. The stale projection can still contain
+previously indexed metadata, although it does not restore deleted archive content.
+
+The controlled ordering is characterized for both adapters in
+`tests/services/test_search_service.py::test_archive_deletion_and_inflight_index_ordering`.
