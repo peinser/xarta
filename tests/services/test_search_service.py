@@ -269,13 +269,6 @@ async def test_postgresql_archive_lifecycle_uses_exact_indexed_predicates() -> N
     adapter = PostgreSQLSearchAdapter(FakePool(connection), {"namespace": "documents"})
     source = ArchiveSearchSource("payroll", uuid4(), uuid4())
 
-    await adapter.remove_archive_version(source=source)
-    assert connection.arguments == (
-        "documents",
-        "payroll",
-        source.document_id,
-        source.version_id,
-    )
     await adapter.remove_archive_document(
         archive=source.archive, document_id=source.document_id
     )
@@ -344,9 +337,22 @@ async def test_elasticsearch_archive_identity_and_lifecycle_are_archive_scoped()
     await adapter.index(idempotency_key=str(uuid4()), document=second)
     assert session.put_urls[0] != session.put_urls[1]
 
-    await adapter.remove_archive_version(source=source)
+    await adapter.remove_archive_document(
+        archive=source.archive, document_id=source.document_id
+    )
     assert "_delete_by_query" in session.posts[-1][0]
     assert "conflicts=proceed" not in session.posts[-1][0]
+    assert session.posts[-1][1] == {
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {"source_kind.keyword": "archive"}},
+                    {"term": {"source_archive.keyword": "payroll"}},
+                    {"term": {"source_document_id.keyword": str(document_id)}},
+                ]
+            }
+        }
+    }
 
 
 class FakeFactory:
@@ -369,11 +375,6 @@ class FakeFactory:
                     raise RuntimeError("index unavailable")
                 factory.documents.append(document)
                 return IndexSubmission(factory.outcome, "index-id")
-
-            async def remove_archive_version(self, *, source):
-                if factory.fail:
-                    raise SearchTransportError("index unavailable")
-                factory.lifecycle.append(("version", source))
 
             async def remove_archive_document(self, *, archive, document_id):
                 if factory.fail:
@@ -492,7 +493,6 @@ def archive_event(
 @pytest.mark.parametrize(
     ("event_type", "expected"),
     [
-        ("xarta.archive.document.version-content-removed", "version"),
         ("xarta.archive.document.deletion-requested", "document"),
         ("xarta.archive.document.deleted", "document"),
     ],

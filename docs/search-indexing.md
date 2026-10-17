@@ -124,7 +124,7 @@ It is separate from the `search-index` DAG worker. Only an explicit DAG node cre
 a projection; `created` and `version-created` never index content implicitly.
 
 Archive snapshots are immutable, so there is no metadata-update event or projection update
-path. `version-content-removed` deletes the exact version's projections.
+path. Versions are retained until the logical document is deleted.
 `deletion-requested` and `deleted` delete every projection for the archive and logical
 document. These operations are idempotent and archive-scoped.
 

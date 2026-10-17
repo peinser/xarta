@@ -1,5 +1,19 @@
 # HTTP API v1 contract revisions
 
+## 6.0.0 — 2026-10-17
+
+- Remove automatic historical-content cleanup. Only the logical document can be
+  deleted; all versions and representations remain retained until explicit deletion
+  or HEAD-expiry-driven deletion of that document. Appending a new version never
+  queues deletion of previous content.
+- Breaking pre-release configuration change: remove `policy.history`. Deploy archive
+  migration `00002.document-only-deletion` before starting the new archive service.
+  Pending history-cleanup intent is cancelled. Previously removed bytes are not restored.
+- Remove historical-content-removal lifecycle events and per-version search cleanup.
+  Document deletion still removes every projection for the logical document.
+  HTTP paths, response shapes, write identities, and tombstone behavior are unchanged.
+- Clarify examples for retained predecessor versions and legacy metadata-only records.
+
 ## 5.1.0 — 2026-10-17
 
 - Add read-only authoritative HEAD metadata search at the scoped and default

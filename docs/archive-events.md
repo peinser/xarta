@@ -13,13 +13,12 @@ documents.archive.<archive-token>.<document-uuid>.<event-token>
 ```
 
 `archive-token` is the archive name encoded as unpadded base64url. Event tokens are
-`created`, `version-created`, `deletion-requested`, `deleted`, and
-`version-content-removed`.
+`created`, `version-created`, `deletion-requested`, and `deleted`.
 
 Accepted JetStream events can be delivered more than once, subject to stream retention
 and consumer configuration. Creation and version events publish after database commit,
-and an exact write replay republishes the same deterministic fact. Persisted deletion
-and retention intent is scanned at startup and periodically to recover commands lost
+and an exact write replay republishes the same deterministic fact. Persisted document
+deletion intent is scanned at startup and periodically to recover commands lost
 after commit.
 
 Final document deletion is recoverable through deletion-command redelivery. When a
@@ -27,11 +26,10 @@ command finds an already-completed operation, it checks for a deleted tombstone 
 the internal aggregate ID, archive, and public document ID. A matching tombstone causes
 `xarta.archive.document.deleted` to be published again before the command is acknowledged.
 An active/deleting document or a mismatched identity does not establish this fact.
-This also applies to an outstanding history command after the entire document is deleted.
 
 The first deleted-event publication and every retry use the tombstone's persisted deleted
 HEAD identities and `updated_at` timestamp. Finalization captures the authoritative HEAD
-under the aggregate lock, rather than an older HEAD carried by a history command. Event
+under the aggregate lock. Event
 ID, occurrence time, and payload are therefore stable across retries. The database
 connection is released before awaiting PubAck. Publication failure leaves the command
 eligible for redelivery; an ambiguous PubAck or command ACK can cause duplicate publication.
@@ -39,8 +37,7 @@ Consumers must tolerate duplicates outside the ten-minute JetStream deduplicatio
 
 Recovery depends on the deletion command remaining in the work queue and an enabled
 deletion consumer eventually processing it. There is no independent tombstone event scan.
-Deletion-requested publication and historical-content-removal publication while the
-document remains active still have post-commit loss windows. Repeating an HTTP DELETE
+Deletion-requested publication still has a post-commit loss window. Repeating an HTTP DELETE
 against a tombstone returns 200 without publication. Final-state convergence does not
 promise delivery of every superseded historical transition or exactly-once delivery.
 
@@ -91,7 +88,6 @@ contain sensitive application data, so `DOCUMENTS` access and retention must be 
 | `xarta.archive.document.version-created` | A subsequent immutable snapshot becomes `HEAD` |
 | `xarta.archive.document.deletion-requested` | Aggregate changes from `active` to `deleting` |
 | `xarta.archive.document.deleted` | All representation content is gone and the aggregate is finalized |
-| `xarta.archive.document.version-content-removed` | One representation's bytes are gone and it is `metadata-only` |
 
 Consumers must use archive, document, version, and representation identities rather than
 assume strict ordering. JetStream sequence reflects broker acceptance order only.

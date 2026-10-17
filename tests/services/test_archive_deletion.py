@@ -22,6 +22,7 @@ from xarta.services.v1.archive.delete import _delete
 from xarta.services.v1.archive.events import archive_event_id
 from xarta.services.v1.archive.nats import publish_deletion_command
 from xarta.services.v1.archive.reconciler import ArchiveDeletionReconciler
+from xarta.services.v1.archive.reconciler import _command
 from xarta.services.v1.archive.reconciler import _start_reconciler
 from xarta.services.v1.archive.reconciler import _stop_reconciler
 
@@ -88,7 +89,7 @@ def install_pool(monkeypatch, connection) -> None:
     )
 
 
-def command(*, kind="document", policy=None) -> DeletionCommand:
+def command() -> DeletionCommand:
     return DeletionCommand(
         aggregate_id=7,
         version_internal_id=11,
@@ -102,8 +103,6 @@ def command(*, kind="document", policy=None) -> DeletionCommand:
         backend="primary",
         backend_revision="v1",
         storage_key="payroll/document/version",
-        kind=kind,
-        history_policy=policy,
     )
 
 
@@ -170,7 +169,6 @@ async def test_delete_commits_lifecycle_then_publishes_pinned_commands(
             backend="primary",
             backend_revision="v1",
             storage_key="payroll/document/version",
-            kind="document",
         )
     ]
     sql = " ".join(query for query, _ in connection.queries)
@@ -272,7 +270,7 @@ async def test_endpoint_returns_202_without_object_io(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_command_publication_has_explicit_deterministic_message_id() -> None:
-    current = command(kind="history", policy="retain-metadata")
+    current = command()
     jetstream = AsyncMock()
 
     await publish_deletion_command(jetstream, current)
@@ -291,9 +289,38 @@ async def test_command_publication_has_explicit_deterministic_message_id() -> No
     assert recreated.message_id != current.message_id
 
 
+def test_removed_history_command_is_rejected() -> None:
+    payload = {
+        **command().dict(),
+        "kind": "history",
+        "history_policy": "retain-metadata",
+    }
+    with pytest.raises(ValueError, match="command shape"):
+        _command(orjson.dumps(payload))
+
+
+@pytest.mark.asyncio
+async def test_active_document_command_never_deletes_content(monkeypatch) -> None:
+    current = command()
+    connection = DeletionConnection({"state": "available", "lifecycle": "active"})
+    install_pool(monkeypatch, connection)
+    backend = SimpleNamespace(delete=AsyncMock())
+    complete = AsyncMock()
+    monkeypatch.setattr(ArchivePostgresModel, "complete_deletion", complete)
+    jetstream = AsyncMock()
+    await ArchiveDeletionReconciler(
+        SimpleNamespace(backend=lambda *_args: backend),  # type: ignore[arg-type]
+        jetstream,
+        300,
+    ).process(current)
+    backend.delete.assert_not_awaited()
+    complete.assert_not_awaited()
+    jetstream.publish.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_reconciler_deletes_then_transitions_then_publishes(monkeypatch) -> None:
-    current = command(kind="history", policy="retain-metadata")
+    current = command()
     calls = []
 
     async def delete(_key):
@@ -306,7 +333,7 @@ async def test_reconciler_deletes_then_transitions_then_publishes(monkeypatch) -
     async def complete(_command):
         calls.append("database")
         return DeletionCompletion(
-            representation_transitioned=True, version_transitioned=True
+            representation_transitioned=True, version_transitioned=True, finalized=True
         )
 
     async def event(*_args, **_kwargs):
@@ -314,9 +341,7 @@ async def test_reconciler_deletes_then_transitions_then_publishes(monkeypatch) -
 
     monkeypatch.setattr(ArchivePostgresModel, "validate_deletion_command", validate)
     monkeypatch.setattr(ArchivePostgresModel, "complete_deletion", complete)
-    monkeypatch.setattr(
-        "xarta.services.v1.archive.reconciler.publish_archive_event", event
-    )
+    monkeypatch.setattr(ArchivePostgresModel, "publish_deleted_event", event)
     registry = SimpleNamespace(backend=lambda *_args: SimpleNamespace(delete=delete))
 
     await ArchiveDeletionReconciler(registry, object(), 300).process(current)  # type: ignore[arg-type]
@@ -382,8 +407,8 @@ async def test_stale_command_is_acked_without_storage_or_completion(
 
 
 @pytest.mark.asyncio
-async def test_history_event_requires_actual_transition(monkeypatch) -> None:
-    current = command(kind="history", policy="retain-metadata")
+async def test_no_transition_without_tombstone_does_not_publish(monkeypatch) -> None:
+    current = command()
     monkeypatch.setattr(
         ArchivePostgresModel, "validate_deletion_command", AsyncMock(return_value=True)
     )
@@ -391,10 +416,6 @@ async def test_history_event_requires_actual_transition(monkeypatch) -> None:
         ArchivePostgresModel,
         "complete_deletion",
         AsyncMock(return_value=DeletionCompletion()),
-    )
-    event = AsyncMock()
-    monkeypatch.setattr(
-        "xarta.services.v1.archive.reconciler.publish_archive_event", event
     )
     backend = SimpleNamespace(delete=AsyncMock())
     install_pool(monkeypatch, DeletionConnection())
@@ -406,7 +427,6 @@ async def test_history_event_requires_actual_transition(monkeypatch) -> None:
         300,
     ).process(current)
 
-    event.assert_not_awaited()
     jetstream.publish.assert_not_awaited()
 
 
@@ -430,14 +450,11 @@ def delivery(current):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["document", "history"])
 @pytest.mark.parametrize("accepted_before_failure", [False, True])
 async def test_completed_deletion_redelivery_republishes_original_fact(
-    monkeypatch, kind, accepted_before_failure
+    monkeypatch, accepted_before_failure
 ) -> None:
-    current = command(
-        kind=kind, policy="retain-metadata" if kind == "history" else None
-    )
+    current = command()
     connection = DeletionConnection()
     install_pool(monkeypatch, connection)
     stored = tombstone()  # The authoritative HEAD differs from the command's HEAD.
@@ -598,7 +615,7 @@ async def test_deleted_event_lookup_requires_matching_identity_and_deleted_lifec
 
 @pytest.mark.asyncio
 async def test_pending_scan_republishes_deterministic_commands(monkeypatch) -> None:
-    pending = [command(), command(kind="history", policy="latest-only")]
+    pending = [command(), command()]
     monkeypatch.setattr(
         ArchivePostgresModel,
         "pending_deletion_commands",
@@ -650,8 +667,6 @@ async def test_coordinate_mismatch_is_terminal_invalid(monkeypatch) -> None:
             "backend": current.backend,
             "backend_revision": current.backend_revision,
             "storage_key": "different/key",
-            "history_cleanup_policy": None,
-            "head": True,
         }
     )
     install_pool(monkeypatch, connection)
@@ -667,7 +682,7 @@ async def test_coordinate_mismatch_is_terminal_invalid(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_completion_clears_intent_and_finalizes_only_without_available_versions(
+async def test_completion_finalizes_only_without_available_versions(
     monkeypatch,
 ) -> None:
     current = command()
@@ -698,7 +713,7 @@ async def test_completion_clears_intent_and_finalizes_only_without_available_ver
         finalized=True,
     )
     sql = " ".join(query for query, _ in connection.queries)
-    assert "history_cleanup_policy = NULL" in sql
+    assert "aggregate.lifecycle = 'deleting'" in sql
     assert "state = 'available'" in sql
     assert "lifecycle = 'deleted'" in sql
     assert "head_version_id = NULL" in sql
@@ -932,8 +947,10 @@ def test_migrations_remove_database_queues_and_use_native_lifecycle_enum() -> No
     plan = (archive / "sqitch.plan").read_text()
 
     assert "CREATE TYPE public.archive_lifecycle AS ENUM" in deploy
-    assert "CREATE TYPE public.archive_history_cleanup_policy AS ENUM" in deploy
-    assert "archive_document_versions_history_cleanup_idx" in deploy
+    document_only = (archive / "deploy/00002.document-only-deletion.sql").read_text()
+    assert "DROP COLUMN history_cleanup_policy" in document_only
+    assert "DROP TYPE public.archive_history_cleanup_policy" in document_only
+    assert "content removal requires logical document deletion" in document_only
     assert "CREATE TABLE public.archive_deletion_jobs" not in deploy
     assert "archive_event_outbox" not in verify
     assert "archive_deletion_jobs" not in verify

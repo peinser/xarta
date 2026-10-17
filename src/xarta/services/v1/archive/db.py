@@ -143,13 +143,11 @@ class DeletionCommand:
     backend: str
     backend_revision: str
     storage_key: str
-    kind: str
-    history_policy: str | None = None
 
     @property
     def message_id(self) -> UUID:
         identity = (
-            f"{self.kind}:{self.aggregate_id}:{self.version_internal_id}:"
+            f"document:{self.aggregate_id}:{self.version_internal_id}:"
             f"{self.representation_internal_id}:{self.representation_id}:"
             f"{self.backend}:{self.backend_revision}:{self.storage_key}"
         )
@@ -169,8 +167,6 @@ class DeletionCommand:
             "backend": self.backend,
             "backend_revision": self.backend_revision,
             "storage_key": self.storage_key,
-            "kind": self.kind,
-            "history_policy": self.history_policy,
         }
 
 
@@ -345,7 +341,7 @@ class ArchivePostgresModel(SanicPostgresModel):
 
         try:
             async with cls.pool().acquire() as connection, connection.transaction():
-                result, commands, event = await cls._prepare_locked(
+                result, event = await cls._prepare_locked(
                     connection, write, policy, tracked_persist
                 )
                 transaction_ready = True
@@ -362,34 +358,9 @@ class ArchivePostgresModel(SanicPostgresModel):
                 await cls._rollback_representations(created_storage, rollback)
             raise
 
-        await cls._publish_commands(commands)
         if event is not None:
             await publish_archive_event(cls._jetstream(), **event)
         return result
-
-    @classmethod
-    async def _history_commands(
-        cls, connection: Connection, aggregate_id: int
-    ) -> list[DeletionCommand]:
-        rows = await connection.fetch(
-            "SELECT aggregate._id AS aggregate_id, version._id AS version_internal_id, "
-            "representation._id AS representation_internal_id, aggregate.archive, "
-            "aggregate.document_id, version.version_id, representation.representation_id, "
-            "head.version_id AS head_version_id, head._id AS head_version_internal_id, "
-            "representation.backend, representation.backend_revision, representation.storage_key, "
-            "version.history_cleanup_policy::text AS history_policy "
-            "FROM archive_documents aggregate JOIN archive_document_versions version "
-            "ON version.aggregate_id = aggregate._id "
-            "JOIN archive_document_representations representation "
-            "ON representation.version_internal_id = version._id "
-            "JOIN archive_document_versions head ON head._id = aggregate.head_version_id "
-            "WHERE aggregate._id = $1 AND aggregate.lifecycle = 'active' "
-            "AND version.history_cleanup_policy IS NOT NULL "
-            "AND representation.state = 'available' "
-            "ORDER BY version._id, representation._id",
-            aggregate_id,
-        )
-        return [DeletionCommand(**dict(row), kind="history") for row in rows]
 
     @staticmethod
     def _write_event(
@@ -463,20 +434,10 @@ class ArchivePostgresModel(SanicPostgresModel):
         write: VersionWrite,
         policy: ArchivePolicy,
         persist: Callable[[], Awaitable[None]],
-    ) -> tuple[VersionResult, list[DeletionCommand], dict[str, Any] | None]:
+    ) -> tuple[VersionResult, dict[str, Any] | None]:
         replay = await cls._replay(connection, write)
         if replay:
-            aggregate = await connection.fetchrow(
-                "SELECT _id FROM archive_documents WHERE archive = $1 AND document_id = $2",
-                write.archive,
-                write.document_id,
-            )
-            commands = (
-                await cls._history_commands(connection, aggregate["_id"])
-                if aggregate
-                else []
-            )
-            return replay, commands, await cls._replay_event(connection, write, replay)
+            return replay, await cls._replay_event(connection, write, replay)
 
         await connection.execute(
             "INSERT INTO archive_documents (archive, document_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
@@ -494,8 +455,7 @@ class ArchivePostgresModel(SanicPostgresModel):
         )
         replay = await cls._replay(connection, write)
         if replay:
-            commands = await cls._history_commands(connection, aggregate["_id"])
-            return replay, commands, await cls._replay_event(connection, write, replay)
+            return replay, await cls._replay_event(connection, write, replay)
         if aggregate["lifecycle"] != "active":
             outcome = (
                 "document_deleted"
@@ -543,7 +503,7 @@ class ArchivePostgresModel(SanicPostgresModel):
                 details.representations,
             )
             await cls._record_replay(connection, aggregate["_id"], write, result)
-            return result, [], None
+            return result, None
 
         if head_public_id is not None and policy.write == "create-only":
             raise ArchiveConflictError(
@@ -594,17 +554,6 @@ class ArchivePostgresModel(SanicPostgresModel):
             aggregate["_id"],
             version_internal_id,
         )
-        commands = []
-        if policy.history != "retain-all":
-            await connection.execute(
-                "UPDATE archive_document_versions SET history_cleanup_policy = $3 "
-                "WHERE aggregate_id = $1 AND _id <> $2 AND state = 'available' "
-                "AND history_cleanup_policy IS NULL",
-                aggregate["_id"],
-                version_internal_id,
-                policy.history,
-            )
-            commands = await cls._history_commands(connection, aggregate["_id"])
         result = VersionResult(
             write.archive,
             write.document_id,
@@ -617,7 +566,6 @@ class ArchivePostgresModel(SanicPostgresModel):
         await cls._record_replay(connection, aggregate["_id"], write, result)
         return (
             result,
-            commands,
             cls._write_event(
                 write,
                 result,
@@ -921,7 +869,7 @@ class ArchivePostgresModel(SanicPostgresModel):
                 aggregate["_id"],
                 aggregate["head_version_internal_id"],
             )
-            commands = [DeletionCommand(**dict(row), kind="document") for row in rows]
+            commands = [DeletionCommand(**dict(row)) for row in rows]
             if not commands:
                 await cls._finalize_tombstone(connection, aggregate["_id"])
                 finalized = True
@@ -983,8 +931,8 @@ class ArchivePostgresModel(SanicPostgresModel):
 
     @staticmethod
     async def _finalize_tombstone(connection: Connection, aggregate_id: int) -> None:
-        # Both callers hold the aggregate lock. A history command may carry an old
-        # HEAD, so capture the current database identity before removing versions.
+        # Both callers hold the aggregate lock. Capture the authoritative HEAD
+        # before removing versions.
         await connection.execute(
             "UPDATE archive_documents aggregate SET lifecycle = 'deleted', head_version_id = NULL, "
             "deleted_head_version_id = head.version_id, deleted_head_version_internal_id = head._id, "
@@ -1008,30 +956,19 @@ class ArchivePostgresModel(SanicPostgresModel):
         after_aggregate_id, after_representation_id = after or (None, None)
         async with cls.pool().acquire() as connection:
             rows = await connection.fetch(
-                "WITH pending AS (SELECT aggregate._id AS aggregate_id, "
+                "SELECT aggregate._id AS aggregate_id, "
                 "version._id AS version_internal_id, representation._id AS representation_internal_id, "
                 "aggregate.archive, aggregate.document_id, version.version_id, "
                 "representation.representation_id, head.version_id AS head_version_id, "
                 "head._id AS head_version_internal_id, representation.backend, "
-                "representation.backend_revision, representation.storage_key, 'document'::text AS kind, "
-                "NULL::text AS history_policy FROM archive_documents aggregate "
+                "representation.backend_revision, representation.storage_key FROM archive_documents aggregate "
                 "JOIN archive_document_versions version ON version.aggregate_id = aggregate._id "
                 "JOIN archive_document_representations representation "
                 "ON representation.version_internal_id = version._id AND representation.state = 'available' "
                 "JOIN archive_document_versions head ON head._id = aggregate.head_version_id "
                 "WHERE aggregate.lifecycle = 'deleting' AND ($1::bigint IS NULL OR "
-                "(aggregate._id, representation._id) > ($1::bigint, $2::bigint)) UNION ALL "
-                "SELECT aggregate._id, version._id, representation._id, aggregate.archive, "
-                "aggregate.document_id, version.version_id, representation.representation_id, "
-                "head.version_id, head._id, representation.backend, representation.backend_revision, "
-                "representation.storage_key, 'history'::text, version.history_cleanup_policy::text "
-                "FROM archive_document_versions version JOIN archive_documents aggregate "
-                "ON aggregate._id = version.aggregate_id JOIN archive_document_representations representation "
-                "ON representation.version_internal_id = version._id AND representation.state = 'available' "
-                "JOIN archive_document_versions head ON head._id = aggregate.head_version_id "
-                "WHERE version.history_cleanup_policy IS NOT NULL AND aggregate.lifecycle = 'active' "
-                "AND ($1::bigint IS NULL OR (aggregate._id, representation._id) > ($1::bigint, $2::bigint))) "
-                "SELECT * FROM pending ORDER BY aggregate_id, representation_internal_id LIMIT $3",
+                "(aggregate._id, representation._id) > ($1::bigint, $2::bigint)) "
+                "ORDER BY aggregate._id, representation._id LIMIT $3",
                 after_aggregate_id,
                 after_representation_id,
                 limit,
@@ -1043,8 +980,7 @@ class ArchivePostgresModel(SanicPostgresModel):
         async with cls.pool().acquire() as connection:
             row = await connection.fetchrow(
                 "SELECT aggregate.archive, aggregate.document_id, aggregate.lifecycle, "
-                "version.version_id, version.history_cleanup_policy::text AS history_cleanup_policy, "
-                "version._id = aggregate.head_version_id AS head, representation.representation_id, "
+                "version.version_id, representation.representation_id, "
                 "representation.state, representation.backend, representation.backend_revision, "
                 "representation.storage_key FROM archive_documents aggregate "
                 "JOIN archive_document_versions version ON version.aggregate_id = aggregate._id "
@@ -1057,13 +993,7 @@ class ArchivePostgresModel(SanicPostgresModel):
             )
         if row is None or row["state"] == "metadata-only":
             return False
-        if command.kind == "document" and row["lifecycle"] != "deleting":
-            return False
-        if command.kind == "history" and (
-            row["lifecycle"] != "active"
-            or row["head"]
-            or row["history_cleanup_policy"] != command.history_policy
-        ):
+        if row["lifecycle"] != "deleting":
             return False
         identities = (
             row["archive"],
@@ -1098,7 +1028,8 @@ class ArchivePostgresModel(SanicPostgresModel):
                 "JOIN archive_document_versions version ON version.aggregate_id = aggregate._id "
                 "AND version._id = $2 JOIN archive_document_representations representation "
                 "ON representation.version_internal_id = version._id AND representation._id = $3 "
-                "WHERE aggregate._id = $1 FOR UPDATE OF aggregate, version, representation",
+                "WHERE aggregate._id = $1 AND aggregate.lifecycle = 'deleting' "
+                "FOR UPDATE OF aggregate, version, representation",
                 command.aggregate_id,
                 command.version_internal_id,
                 command.representation_internal_id,
@@ -1126,13 +1057,11 @@ class ArchivePostgresModel(SanicPostgresModel):
             if not remaining_in_version:
                 version_transitioned = bool(
                     await connection.fetchval(
-                        "UPDATE archive_document_versions SET state = 'metadata-only', "
-                        "history_cleanup_policy = NULL WHERE _id = $1 AND state = 'available' RETURNING true",
+                        "UPDATE archive_document_versions SET state = 'metadata-only' "
+                        "WHERE _id = $1 AND state = 'available' RETURNING true",
                         command.version_internal_id,
                     )
                 )
-            if aggregate["lifecycle"] != "deleting":
-                return DeletionCompletion(True, version_transitioned)
             remaining = await connection.fetchval(
                 "SELECT EXISTS (SELECT 1 FROM archive_document_representations representation "
                 "JOIN archive_document_versions version ON version._id = representation.version_internal_id "

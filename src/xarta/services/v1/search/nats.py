@@ -164,7 +164,6 @@ class SearchNATSModel(SanicNATSSynchronousRequestsConsumerModel):
 _ARCHIVE_EVENTS = {
     "xarta.archive.document.created",
     "xarta.archive.document.version-created",
-    "xarta.archive.document.version-content-removed",
     "xarta.archive.document.deletion-requested",
     "xarta.archive.document.deleted",
 }
@@ -191,18 +190,6 @@ def _archive_event(data: bytes) -> tuple[str, str, UUID, UUID | None]:
             classification="malformed",
             error_code="malformed_archive_event",
         )
-    if (
-        event_type
-        in {
-            "xarta.archive.document.version-content-removed",
-        }
-        and version_id is None
-    ):
-        raise PermanentError(
-            "Archive version lifecycle event requires version_id",
-            classification="malformed",
-            error_code="malformed_archive_event",
-        )
     return event_type, archive, document_id, version_id
 
 
@@ -221,15 +208,9 @@ async def _archive_lifecycle_worker(
             adapter = components.adapters.create(
                 resolved.binding.adapter, resolved.configuration
             )
-            if event_type == "xarta.archive.document.version-content-removed":
-                assert version_id is not None
-                await adapter.remove_archive_version(
-                    source=ArchiveSearchSource(archive, document_id, version_id)
-                )
-            else:
-                await adapter.remove_archive_document(
-                    archive=archive, document_id=document_id
-                )
+            await adapter.remove_archive_document(
+                archive=archive, document_id=document_id
+            )
     except SearchTransportError as ex:
         raise TemporaryError("Search index is temporarily unavailable", delay=5) from ex
 

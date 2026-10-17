@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import hashlib
 import os
 import shlex
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from urllib.parse import urlsplit
 from uuid import UUID
 from uuid import uuid4
@@ -19,7 +21,13 @@ import pytest
 import pytest_asyncio
 
 from xarta.services.v1.archive.db import ArchivePostgresModel
+from xarta.services.v1.archive.db import RepresentationWrite
+from xarta.services.v1.archive.db import VersionWrite
+from xarta.services.v1.archive.reconciler import ArchiveDeletionReconciler
+from xarta.services.v1.archive.reconciler import _command
 from xarta.services.v1.archive.search import search_scoped
+from xarta.services.v1.archive.storage import ArchivePolicy
+from xarta.services.v1.archive.storage import FilesystemStorageBackend
 
 pytestmark = pytest.mark.skipif(
     "ARCHIVE_POSTGRES_TEST_DSN" not in os.environ,
@@ -239,7 +247,7 @@ async def snapshot(pool):
     return tuple(
         [
             await pool.fetchval(
-                f"SELECT jsonb_agg(to_jsonb(row) ORDER BY _id) FROM public.{table} row"
+                f"SELECT jsonb_agg(to_jsonb(row) - 'history_cleanup_policy' ORDER BY _id) FROM public.{table} row"
             )
             for table in (
                 "archive_documents",
@@ -327,3 +335,160 @@ async def test_sqitch_upgrade_revert_and_interrupted_build_recovery(database):
     await migrate("deploy", "--verify")
     await migrate("verify")
     assert await snapshot(pool) == original
+
+
+async def test_document_only_upgrade_cancels_pending_history_cleanup(database):
+    pool, migrate = database
+    await migrate("deploy", "--verify", "--to", "00001.archive-metadata-search")
+    document_id = uuid4()
+    removed = await add_version(pool, "invoices", document_id, {"revision": 1})
+    pending = await add_version(pool, "invoices", document_id, {"revision": 2})
+    await add_version(pool, "invoices", document_id, {"revision": 3})
+    await pool.execute(
+        "UPDATE archive_document_representations SET state = 'metadata-only', storage_key = NULL "
+        "WHERE version_internal_id = (SELECT _id FROM archive_document_versions WHERE version_id = $1)",
+        removed,
+    )
+    await pool.execute(
+        "UPDATE archive_document_versions SET state = 'metadata-only' WHERE version_id = $1",
+        removed,
+    )
+    await pool.execute(
+        "UPDATE archive_document_versions SET history_cleanup_policy = 'retain-metadata' WHERE version_id = $1",
+        pending,
+    )
+    references = await ArchivePostgresModel.find_sources(
+        "invoices", document_id, pending
+    )
+    await migrate("deploy", "--verify")
+    await migrate("verify")
+    assert await ArchivePostgresModel.pending_deletion_commands(limit=100) == []
+    assert (
+        await ArchivePostgresModel.find_sources("invoices", document_id, pending)
+        == references
+    )
+    assert (
+        await pool.fetchval(
+            "SELECT state::text FROM archive_document_versions WHERE version_id = $1",
+            removed,
+        )
+        == "metadata-only"
+    )
+    await migrate("revert", "-y", "--to", "00001.archive-metadata-search")
+    assert (
+        await pool.fetchval(
+            "SELECT history_cleanup_policy FROM archive_document_versions WHERE version_id = $1",
+            pending,
+        )
+        is None
+    )
+
+
+async def test_all_versions_retained_until_logical_document_deletion(
+    database, monkeypatch, tmp_path
+):
+    pool, migrate = database
+    await migrate("deploy", "--verify")
+    backend = FilesystemStorageBackend(str(tmp_path))
+    jetstream = AsyncMock()
+    monkeypatch.setattr(
+        ArchivePostgresModel, "_jetstream", staticmethod(lambda: jetstream)
+    )
+    document_id = uuid4()
+    parent = None
+    writes = []
+    content = b"invoice content"
+
+    async def persist(representation):
+        return await backend.put(
+            representation.storage_key, content, representation.content_type
+        )
+
+    async def rollback(representation):
+        await backend.delete(representation.storage_key)
+
+    for number in (1, 2):
+        version_id, representation_id = uuid4(), uuid4()
+        representation = RepresentationWrite(
+            representation_id=representation_id,
+            name="invoice.txt",
+            content_type="text/plain",
+            metadata={},
+            backend="test",
+            backend_revision="v1",
+            storage_key=f"{document_id}/{version_id}/{representation_id}",
+            checksum=hashlib.sha512(content).digest(),
+            size=len(content),
+        )
+        candidate = VersionWrite(
+            archive="invoices",
+            document_id=document_id,
+            version_id=version_id,
+            parent_version_id=parent,
+            idempotency_key=f"invoice-version-{number}",
+            fingerprint=hashlib.sha512(str(number).encode()).digest(),
+            snapshot_fingerprint=hashlib.sha512(str(number).encode()).digest(),
+            created=datetime.datetime(2030, 1, number, tzinfo=datetime.UTC),
+            expires=None,
+            document_type="invoice",
+            metadata={"revision": number},
+            default_representation_id=representation_id,
+            representations=(representation,),
+        )
+        result = await ArchivePostgresModel.prepare_version(
+            candidate, ArchivePolicy(), persist, rollback
+        )
+        assert result.outcome == ("created" if number == 1 else "version_created")
+        writes.append(candidate)
+        parent = version_id
+
+    assert all(
+        not call.args[0].startswith("archive.commands.")
+        for call in jetstream.publish.await_args_list
+    )
+    assert await ArchivePostgresModel.pending_deletion_commands(limit=100) == []
+    for candidate in writes:
+        references = await ArchivePostgresModel.find_sources(
+            "invoices", document_id, candidate.version_id
+        )
+        assert len(references) == 1
+        assert await backend.get(references[0].storage_key) == content
+
+    jetstream.reset_mock()
+    await ArchivePostgresModel.request_deletion(
+        "invoices",
+        document_id,
+        safe=False,
+        now=datetime.datetime.now(tz=datetime.UTC),
+    )
+    commands = [
+        _command(call.args[1])
+        for call in jetstream.publish.await_args_list
+        if call.args[0] == "archive.commands.delete"
+    ]
+    assert {item.version_id for item in commands} == {
+        item.version_id for item in writes
+    }
+    reconciler = ArchiveDeletionReconciler(
+        SimpleNamespace(backend=lambda *_args: backend),
+        jetstream,
+        300,
+    )
+    for item in commands:
+        await reconciler.process(item)
+        with pytest.raises(FileNotFoundError):
+            await backend.get(item.storage_key)
+    assert (
+        await pool.fetchval(
+            "SELECT lifecycle::text FROM archive_documents WHERE document_id = $1",
+            document_id,
+        )
+        == "deleted"
+    )
+    assert await pool.fetchval("SELECT count(*) FROM archive_document_versions") == 0
+    assert (
+        await pool.fetchval("SELECT count(*) FROM archive_document_representations")
+        == 0
+    )
+    assert await pool.fetchval("SELECT count(*) FROM archive_idempotency") == 0
+    assert await ArchivePostgresModel.pending_deletion_commands(limit=100) == []

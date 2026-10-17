@@ -3,7 +3,7 @@
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "info": {
     "title": "Xarta HTTP and Workflow Capabilities API",
-    "version": "5.1.0",
+    "version": "6.0.0",
     "summary": "Contracts for all implemented Xarta v1 HTTP services and intake workflow nodes.",
     "description": "The union of independently deployable services. A deployment may expose only a subset; discover enabled workflow kinds at /api/v1/intake/capabilities. HTTP acceptance does not imply workflow completion. Canonical API paths are version-pinned; x-path-alias records the floating /api alias. Security requirements describe service-level enforcement only; ingress authorization is deployment-specific. NATS and MCP are separate protocols, not REST operations. See contracts/openapi/README.md for versioning and maintenance. Named examples use synthetic invoice/customer identities and reserved example domains. Unless explicitly tied to repository configuration or vendored UBL fixtures, destinations, templates, policies, provider references, timestamps, hashes and credentials are illustrative. Binary uploads/downloads use file-oriented x-codeSamples rather than fake JSON bytes. See contracts/openapi/README.md for the example scenarios and prerequisites.",
     "license": {
@@ -35,7 +35,7 @@
     },
     {
       "name": "archive",
-      "description": "Immutable document versions, representations, downloads and retention-aware deletion."
+      "description": "Immutable document versions, representations, downloads and retention-aware logical-document deletion. All versions and representations are retained until the whole document is deleted, explicitly or through HEAD expiry. Appending a version never removes previous content. There is no independent version or representation deletion and no configurable history cleanup. Deploy archive migration 00002.document-only-deletion and remove policy.history from storage configuration before starting this version. Content already removed by older deployments is not restored; its recorded metadata-only availability remains visible."
     },
     {
       "name": "render",
@@ -12305,7 +12305,7 @@
               "available",
               "metadata-only"
             ],
-            "description": "Aggregate content retention: available while at least one representation retains bytes; metadata-only when none do. The default representation may already be metadata-only while another is available."
+            "description": "Aggregate content retention: available while at least one representation retains bytes; metadata-only when none do. All versions now retain content until logical-document deletion. Metadata-only or partially available active versions can remain from older deployments that removed historical content; the default representation may be unavailable in those records."
           },
           "representations": {
             "$ref": "#/components/schemas/ArchiveRepresentationSet"
@@ -22876,6 +22876,7 @@
       },
       "ArchiveNewVersionManifest": {
         "summary": "Append a complete second version with its parent identity",
+        "description": "Appending version 43d7c2eb-ce46-568b-a7af-fe0b2318af7d preserves version 6518eb3c-c1eb-5f49-a1bf-67c91308e31e and all its representation bytes. Only deleting the logical document removes both versions.",
         "value": {
           "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
           "version": {
@@ -24420,7 +24421,7 @@
       },
       "ArchiveMetadataOnlyVersion": {
         "summary": "An expired historical version whose bytes have been removed",
-        "description": "Metadata, original sizes and checksums are retained. Byte downloads are unavailable. This is archive content retention, not workflow completion.",
+        "description": "An existing record from an older deployment that removed historical content. Metadata, original sizes and checksums are retained, but byte downloads are unavailable. New writes retain all historical content until logical-document deletion; upgrading does not restore previously removed bytes.",
         "value": {
           "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
           "archive": "default",

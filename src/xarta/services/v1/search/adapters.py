@@ -30,8 +30,6 @@ class SearchAdapter(Protocol):
         self, *, idempotency_key: str, document: SearchableDocument
     ) -> IndexSubmission: ...
 
-    async def remove_archive_version(self, *, source: ArchiveSearchSource) -> None: ...
-
     async def remove_archive_document(
         self, *, archive: str, document_id: uuid.UUID
     ) -> None: ...
@@ -149,17 +147,6 @@ class PostgreSQLSearchAdapter:
             TimeoutError,
         ) as ex:
             raise SearchTransportError("PostgreSQL search index is unavailable") from ex
-
-    async def remove_archive_version(self, *, source: ArchiveSearchSource) -> None:
-        await self._execute(
-            "DELETE FROM public.search_documents WHERE namespace = $1 "
-            "AND source_kind = 'archive' AND source_archive = $2 "
-            "AND source_document_id = $3 AND source_version_id = $4",
-            self.namespace,
-            source.archive,
-            source.document_id,
-            source.version_id,
-        )
 
     async def remove_archive_document(
         self, *, archive: str, document_id: uuid.UUID
@@ -324,33 +311,16 @@ class ElasticsearchSearchAdapter:
         except (aiohttp.ClientError, TimeoutError) as ex:
             raise SearchTransportError("ElasticSearch is unavailable") from ex
 
-    async def remove_archive_version(self, *, source: ArchiveSearchSource) -> None:
-        await self._delete_by_query(self._archive_filters(source))
-
     async def remove_archive_document(
         self, *, archive: str, document_id: uuid.UUID
     ) -> None:
         await self._delete_by_query(
-            self._archive_filters(
-                ArchiveSearchSource(archive, document_id, uuid.UUID(int=0)),
-                include_version=False,
-            )
+            [
+                {"term": {"source_kind.keyword": "archive"}},
+                {"term": {"source_archive.keyword": archive}},
+                {"term": {"source_document_id.keyword": str(document_id)}},
+            ]
         )
-
-    @staticmethod
-    def _archive_filters(
-        source: ArchiveSearchSource, *, include_version: bool = True
-    ) -> list[dict[str, dict[str, str]]]:
-        filters = [
-            {"term": {"source_kind.keyword": "archive"}},
-            {"term": {"source_archive.keyword": source.archive}},
-            {"term": {"source_document_id.keyword": str(source.document_id)}},
-        ]
-        if include_version:
-            filters.append(
-                {"term": {"source_version_id.keyword": str(source.version_id)}}
-            )
-        return filters
 
     async def _delete_by_query(self, filters) -> None:
         await self._request(

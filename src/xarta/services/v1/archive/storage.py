@@ -202,15 +202,12 @@ class S3StorageBackend:
 @dataclass(frozen=True)
 class ArchivePolicy:
     write: str = "versioned"
-    history: str = "retain-all"
     require_current_predecessor: bool = False
     duplicate_unchanged: bool = True
 
     def __post_init__(self) -> None:
         if self.write not in {"create-only", "versioned", "replace-current"}:
             raise ValueError(f"Unknown archive write policy: {self.write}")
-        if self.history not in {"retain-all", "retain-metadata", "latest-only"}:
-            raise ValueError(f"Unknown archive history policy: {self.history}")
 
 
 @dataclass(frozen=True)
@@ -301,6 +298,10 @@ class ArchiveStorageRegistry:
             backend_revision = backend_revisions[backend_name]
             backend = self._backends[(backend_name, backend_revision)]
             policy_configuration = archive_configuration.get("policy", {})
+            if "history" in policy_configuration:
+                raise ValueError(
+                    "Archive history policy was removed; only whole documents can be deleted"
+                )
             for flag in ("require_current_predecessor", "duplicate_unchanged"):
                 if flag in policy_configuration and not isinstance(
                     policy_configuration[flag], bool
@@ -313,7 +314,6 @@ class ArchiveStorageRegistry:
                 backend=backend,
                 policy=ArchivePolicy(
                     write=policy_configuration.get("write", "versioned"),
-                    history=policy_configuration.get("history", "retain-all"),
                     require_current_predecessor=policy_configuration.get(
                         "require_current_predecessor", False
                     ),

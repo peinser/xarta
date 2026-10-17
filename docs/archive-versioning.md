@@ -24,7 +24,7 @@ archive_document_versions
 archive_document_representations
 + _id (PK), version_internal_id (FK), representation_id
 + name, content_type, metadata, checksum, size, state
-+ backend, backend_revision, storage_key, pending_cleanup_policy
++ backend, backend_revision, storage_key
 
 archive_idempotency
 + archive + idempotency_key (unique)
@@ -171,11 +171,9 @@ Policies are selected by the destination archive; request fields cannot override
 | `versioned` | `201 version_created` | `200 unchanged` when duplicate detection is enabled |
 | `replace-current` | `201 version_created` | `200 unchanged` when duplicate detection is enabled |
 
-| History policy | Previous snapshot metadata | Previous representation content |
-|---|---|---|
-| `retain-all` | retained | retained |
-| `retain-metadata` | retained | removed; representation becomes `metadata-only` |
-| `latest-only` | retained as an immutable audit snapshot | removed; representation becomes `metadata-only` |
+All previous versions and representations are retained until the logical document
+is deleted. There is no history-cleanup policy or independent version/representation
+deletion. HEAD expiry authorizes whole-document deletion, including every version.
 
 `require_current_predecessor` compares the supplied HTTP `version.parent`
 (`parent_version_id` in workflow nodes) with locked `HEAD`.
@@ -197,7 +195,7 @@ performed; uncertain commits and failed cleanup may leave objects for separate,
 reference-aware reclamation. The same physical PUT can still be retried conditionally
 without overwriting different bytes.
 
-Deletion and history cleanup fan out one durable command per available representation.
+Logical document deletion fans out one durable command per available representation.
 Commands pin aggregate, version, representation, backend revision, and storage key. Missing
 objects and already-completed commands are idempotent success; coordinate mismatches are
 terminal-invalid; transient failures are NAKed with bounded backoff. Completion changes a

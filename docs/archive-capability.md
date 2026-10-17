@@ -72,7 +72,7 @@ stores document state, replay records, and deletion intent, which are separate
 from workflow execution tracking.
 
 An accepted archive write does not wait for superseded content to be removed.
-History cleanup and document deletion run asynchronously.
+Logical document deletion runs asynchronously and removes all versions' content.
 
 ## Using archive in a workflow
 
@@ -373,7 +373,7 @@ actual previous `HEAD`.
 `HEAD` is the latest accepted version, not necessarily the version with the latest
 caller-supplied `created_at` timestamp.
 
-### Write and history policies
+### Write policies
 
 Policies belong to the receiving archive configuration. Requests cannot override
 them.
@@ -390,16 +390,10 @@ disabled, equivalent submissions proceed through the write policy: versioned
 archives can create another version, while `create-only` rejects an existing
 document.
 
-| History policy | Superseded version metadata | Superseded representation bytes |
-|---|---|---|
-| `retain-all` | Retained | Retained |
-| `retain-metadata` | Retained | Removed asynchronously |
-| `latest-only` | Currently retained | Removed asynchronously |
-
-Removed representations become `metadata-only`. `latest-only` currently behaves
-like `retain-metadata` for content cleanup; metadata-row pruning and the reserved
-`history-pruned` event are not implemented. Write policy and history policy are
-independent: `replace-current` alone does not remove older content.
+Every write policy retains all previous versions and their representation bytes.
+Only the logical document can be deleted, explicitly or through HEAD expiry.
+Versions and representations cannot be deleted independently. There is no history
+cleanup policy; `replace-current` advances HEAD without removing older content.
 
 ### Exact replay versus equivalent content
 
@@ -511,7 +505,7 @@ backend identities, and credentials are not exposed.
 recorded as retained, or `metadata-only` after removal. It is not workflow progress,
 a live storage-health check, or an expiry check. The snapshot's aggregate
 `content_availability` remains `available` while **any** representation retains
-bytes; the default may already be metadata-only during cleanup. Sizes and checksums
+bytes; older deployments may have left a metadata-only default. Sizes and checksums
 continue to describe the original bytes after removal.
 
 ### Content negotiation and integrity
@@ -604,8 +598,7 @@ expire the aggregate; the current `HEAD` controls safe deletion.
 
 The `expire-archived-documents` job processes at most `CLEANUP_BATCHSIZE` documents
 per run (default 10,000), with up to 32 concurrent deletion requests. Its schedule
-is configured by the deployment. History cleanup after a new version is a separate
-policy mechanism and does not wait for the old version's expiration.
+is configured by the deployment. New versions never trigger cleanup of previous versions.
 
 ### Deletion lifecycle
 
@@ -632,17 +625,17 @@ document tombstone. The same archive/document identity cannot be recreated.
 
 ### Durable cleanup and recovery
 
-Deletion and history retention create one command per available representation on
+Logical document deletion creates one command per available representation on
 `archive.commands.delete`, in the `ARCHIVE_COMMANDS` JetStream work queue. Commands
 pin internal and public document/version/representation identities, backend revision,
 and storage key. The consumer validates these coordinates before removing content.
 
 Missing objects and already-completed work are idempotent success. Coordinate
 mismatches are terminal-invalid; transient failures are negatively acknowledged
-with bounded backoff. Completed history cleanup leaves metadata and clears storage
-coordinates. Document deletion finishes only after all available content is gone.
+with bounded backoff. Representation cleanup clears storage coordinates only while
+the logical document is deleting. Deletion finishes after all versions' content is gone.
 
-Persisted deletion and history-cleanup intent is scanned on startup and periodically
+Persisted document deletion intent is scanned on startup and periodically
 to recover commands lost between SQL commit and broker publication. This recovery
 is for desired cleanup state, not a general lifecycle-event outbox.
 
@@ -664,7 +657,6 @@ are:
 | `xarta.archive.document.version-created` | Subsequent snapshot accepted |
 | `xarta.archive.document.deletion-requested` | Aggregate deletion requested |
 | `xarta.archive.document.deleted` | Aggregate deletion finalized |
-| `xarta.archive.document.version-content-removed` | One representation's content removed |
 
 Events use a CloudEvents-style JSON envelope and deterministic event IDs, also
 supplied as `Nats-Msg-Id`. Consumers must tolerate duplicates and must not infer
@@ -678,11 +670,10 @@ An exact write replay can repair a creation event. Deletion-command redelivery
 republishes a final document-deleted fact from a matching tombstone, awaiting PubAck
 before ACK even when physical deletion has already completed. Initial publication
 and retries use the tombstone's persisted HEAD identities and finalization timestamp;
-database connections are released before publication. This includes history commands
-that arrive after whole-document deletion. Other stale commands do not imply deletion.
+database connections are released before publication. Other stale commands do not imply deletion.
 Retry after broker acceptance can duplicate an event outside the ten-minute broker
-deduplication window. Deletion-requested and active-document history-removal events
-still have post-commit loss windows; recovery targets final-state convergence rather
+deduplication window. Deletion-requested events still have a post-commit loss window;
+recovery targets final-state convergence rather
 than delivery of every historical transition. See the event delivery contract below.
 
 Events omit content and storage coordinates, but include application metadata.
@@ -749,7 +740,6 @@ example uses no credentials:
       "backend": "primary",
       "policy": {
         "write": "versioned",
-        "history": "retain-all",
         "require_current_predecessor": true,
         "duplicate_unchanged": true
       }
@@ -776,7 +766,7 @@ existing objects. Do not repoint an existing revision to a different location.
 
 Without a storage configuration file, the fallback is archive `default`, using
 filesystem storage rooted at `ARCHIVE_STORAGE` (code default `archive`). Policy
-defaults are `versioned`, `retain-all`, `require_current_predecessor: false`, and
+defaults are `versioned`, `require_current_predecessor: false`, and
 `duplicate_unchanged: true`. Local development intentionally overrides some of
 these defaults; see [Archive development](development/archive.md).
 
@@ -1008,7 +998,7 @@ and [expiration CronJob template](../k8s/helm/charts/core/templates/cronjobs/exp
 | Unknown archive | Check the logical archive registry on the receiving service, not just the worker's destination names. |
 | `300` on a download | Several representations match equally. Select an exact representation. |
 | `406` on a download | The requested `Accept` does not match an available representation. |
-| Details exist but historical content is unavailable | Check representation state and history policy; `metadata-only` content was intentionally removed. |
+| Details exist but historical content is unavailable | Inspect recorded availability. Content removed by older deployments cannot be restored by disabling history cleanup. |
 | Content unavailable unexpectedly | Check aggregate lifecycle, backend revision availability, and the stored object's existence. |
 | Integrity verification failure | Investigate stored-object corruption or external modification; content is deliberately not returned. |
 | Deletion stays pending | Check the reconciler is enabled, JetStream commands, storage access, retained backend revisions, and cleanup error logs. |

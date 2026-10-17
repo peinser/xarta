@@ -28,7 +28,6 @@
       "backend": "default-s3",
       "policy": {
         "write": "versioned",
-        "history": "retain-all",
         "require_current_predecessor": true,
         "duplicate_unchanged": true
       }
@@ -37,7 +36,6 @@
       "backend": "secondary-s3",
       "policy": {
         "write": "versioned",
-        "history": "retain-metadata",
         "require_current_predecessor": false,
         "duplicate_unchanged": true
       }

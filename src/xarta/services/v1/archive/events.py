@@ -19,7 +19,6 @@ EVENT_TOKENS = {
     "xarta.archive.document.version-created": "version-created",
     "xarta.archive.document.deletion-requested": "deletion-requested",
     "xarta.archive.document.deleted": "deleted",
-    "xarta.archive.document.version-content-removed": "version-content-removed",
 }
 
 REPRESENTATION_EVENT_FIELDS = {

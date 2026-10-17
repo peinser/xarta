@@ -6,8 +6,7 @@ SELECT _id, archive, document_id, head_version_id, lifecycle,
        deleted_head_version_id, deleted_head_version_internal_id
 FROM public.archive_documents WHERE FALSE;
 SELECT _id, aggregate_id, version_id, parent_version_id, document_type,
-       metadata, default_representation_id, snapshot_fingerprint, sealed, state,
-       history_cleanup_policy
+       metadata, default_representation_id, snapshot_fingerprint, sealed, state
 FROM public.archive_document_versions WHERE FALSE;
 SELECT _id, version_internal_id, representation_id, name, content_type, metadata,
        backend, backend_revision, storage_key, checksum, size, state
@@ -15,12 +14,11 @@ FROM public.archive_document_representations WHERE FALSE;
 SELECT _id, archive, aggregate_id, idempotency_key, request_fingerprint, response
 FROM public.archive_idempotency WHERE FALSE;
 
-SELECT 1 / CASE WHEN count(*) = 3 THEN 1 ELSE 0 END
+SELECT 1 / CASE WHEN count(*) = 2 THEN 1 ELSE 0 END
 FROM pg_type
 WHERE typname IN (
     'archive_version_state',
-    'archive_lifecycle',
-    'archive_history_cleanup_policy'
+    'archive_lifecycle'
 ) AND typtype = 'e';
 
 SELECT 1 / CASE WHEN count(*) = 3 THEN 1 ELSE 0 END
@@ -31,7 +29,7 @@ WHERE conname IN (
     'archive_document_versions_default_representation_fk'
 ) AND condeferrable;
 
-SELECT 1 / CASE WHEN count(*) = 9 THEN 1 ELSE 0 END
+SELECT 1 / CASE WHEN count(*) = 8 THEN 1 ELSE 0 END
 FROM pg_indexes
 WHERE schemaname = 'public' AND indexname IN (
     'archive_document_representations_storage_idx',
@@ -41,7 +39,6 @@ WHERE schemaname = 'public' AND indexname IN (
     'archive_documents_head_idx',
     'archive_documents_deleting_idx',
     'archive_document_representations_available_version_idx',
-    'archive_document_versions_history_cleanup_idx',
     'archive_document_versions_pagination_idx'
 );
 
@@ -196,6 +193,7 @@ BEGIN
     EXCEPTION WHEN SQLSTATE '55000' THEN NULL;
     END;
 
+    UPDATE public.archive_documents SET lifecycle = 'deleting' WHERE _id = document_internal_id;
     UPDATE public.archive_document_representations
     SET state = 'metadata-only', storage_key = NULL
     WHERE representation_id = '20000000-0000-0000-0000-000000000002';
@@ -203,7 +201,7 @@ BEGIN
     SET state = 'metadata-only', storage_key = NULL
     WHERE representation_id = '20000000-0000-0000-0000-000000000001';
     UPDATE public.archive_document_versions
-    SET state = 'metadata-only', history_cleanup_policy = NULL
+    SET state = 'metadata-only'
     WHERE _id = stored_version_internal_id;
 END;
 $$;

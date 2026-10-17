@@ -23,7 +23,6 @@ from xarta.telemetry import nats_consumer_span
 from .base import bp
 from .db import ArchivePostgresModel as DB
 from .db import DeletionCommand
-from .events import publish_archive_event
 
 if TYPE_CHECKING:
     from sanic import Sanic
@@ -89,20 +88,9 @@ def _command(data: bytes) -> DeletionCommand:
         "backend",
         "backend_revision",
         "storage_key",
-        "kind",
-        "history_policy",
     }
     if not isinstance(payload, dict) or set(payload) != required:
         raise ValueError("Invalid archive deletion command shape")
-    if payload["kind"] not in {"document", "history"}:
-        raise ValueError("Invalid archive deletion command kind")
-    if payload["kind"] == "document" and payload["history_policy"] is not None:
-        raise ValueError("Document deletion command cannot have a history policy")
-    if payload["kind"] == "history" and payload["history_policy"] not in {
-        "retain-metadata",
-        "latest-only",
-    }:
-        raise ValueError("Invalid archive history policy")
     command = DeletionCommand(
         aggregate_id=int(payload["aggregate_id"]),
         version_internal_id=int(payload["version_internal_id"]),
@@ -116,8 +104,6 @@ def _command(data: bytes) -> DeletionCommand:
         backend=payload["backend"],
         backend_revision=payload["backend_revision"],
         storage_key=payload["storage_key"],
-        kind=payload["kind"],
-        history_policy=payload["history_policy"],
     )
     if (
         command.aggregate_id < 1
@@ -145,17 +131,6 @@ class ArchiveDeletionReconciler:
                 await backend.delete(command.storage_key)
 
             completion = await DB.complete_deletion(command)
-            if command.kind == "history" and completion.version_transitioned:
-                await publish_archive_event(
-                    self.jetstream,
-                    event_type="xarta.archive.document.version-content-removed",
-                    archive=command.archive,
-                    document_id=command.document_id,
-                    aggregate_id=command.aggregate_id,
-                    version_internal_id=command.version_internal_id,
-                    version_id=command.version_id,
-                    outcome=command.history_policy,
-                )
             if completion.representation_transitioned and not completion.finalized:
                 return
 

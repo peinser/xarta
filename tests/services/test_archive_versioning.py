@@ -619,7 +619,6 @@ def test_destination_selects_server_policy_and_pinned_backend(tmp_path) -> None:
                     "backend": "cold",
                     "policy": {
                         "write": "create-only",
-                        "history": "retain-all",
                         "require_current_predecessor": True,
                     },
                 }
@@ -630,6 +629,19 @@ def test_destination_selects_server_policy_and_pinned_backend(tmp_path) -> None:
     target = registry.resolve("payroll")
     assert target.policy.require_current_predecessor is True
     assert registry.backend("cold", "2026-08") is target.backend
+
+
+@pytest.mark.parametrize("history", ["retain-all", "retain-metadata", "latest-only"])
+def test_removed_history_policy_is_rejected(tmp_path, history) -> None:
+    with pytest.raises(ValueError, match="history policy was removed"):
+        ArchiveStorageRegistry(
+            {
+                "archives": {
+                    "default": {"backend": "filesystem", "policy": {"history": history}}
+                }
+            },
+            os.fspath(tmp_path),
+        )
 
 
 @pytest.mark.asyncio

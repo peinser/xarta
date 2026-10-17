@@ -85,7 +85,7 @@ randomly named databases:
 
 ```console
 ARCHIVE_POSTGRES_TEST_DSN=postgresql://dev:dev@localhost:5432/postgres \
-  uv run --frozen pytest tests/services/test_archive_search_postgres.py
+  uv run --frozen pytest tests/services/test_archive_postgres.py
 ```
 
 `sqitch` must be on PATH; the optional `SQITCH` environment variable can specify its
