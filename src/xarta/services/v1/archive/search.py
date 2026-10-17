@@ -92,6 +92,16 @@ def parse_filter(value: Any) -> dict[str, Any]:
 
 
 def search_cursor_scope(archive: str, filters: dict[str, Any]) -> str:
+    """Fingerprint the query once per request, independently of batch size.
+
+    This is a comparison label, not a cache key. Nothing is stored under the digest.
+    The client repeats its filter; the server compares this label with the one in
+    the cursor before issuing a fresh database query after the cursor's position.
+
+    The caller passes parse_filter() output: empty root metadata filters are
+    removed, and sorted JSON keys make object insertion order irrelevant. This
+    digest binds a continuation to the same query; it does not sign the cursor.
+    """
     criteria = {
         "archive": archive,
         "filter": filters,
@@ -162,6 +172,8 @@ async def _search(request: Request, archive: str) -> HTTPResponse:
             "Archive metadata search is temporarily unavailable."
         ) from ex
     items = rows[:limit]
+    # The extra row proves continuation exists. Bookmark the last returned row,
+    # not that lookahead row, otherwise the next strict `>` seek would skip it.
     next_cursor = (
         encode_cursor(scope, {"document_id": items[-1]["id"]})
         if len(rows) > limit
