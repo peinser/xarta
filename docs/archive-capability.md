@@ -673,10 +673,17 @@ create a new creation/version event; exact replay of a creation write republishe
 its deterministic fact.
 
 Publication occurs after SQL commit, without an archive event outbox. A crash
-between commit and publication can lose an event; a replay can repair a creation
-event, and retry after broker acceptance can duplicate it outside the broker's
-deduplication window. Do not assume that stream delivery guarantees make the
-database-to-event handoff lossless.
+between commit and publication can lose an event unless its recovery path runs.
+An exact write replay can repair a creation event. Deletion-command redelivery
+republishes a final document-deleted fact from a matching tombstone, awaiting PubAck
+before ACK even when physical deletion has already completed. Initial publication
+and retries use the tombstone's persisted HEAD identities and finalization timestamp;
+database connections are released before publication. This includes history commands
+that arrive after whole-document deletion. Other stale commands do not imply deletion.
+Retry after broker acceptance can duplicate an event outside the ten-minute broker
+deduplication window. Deletion-requested and active-document history-removal events
+still have post-commit loss windows; recovery targets final-state convergence rather
+than delivery of every historical transition. See the event delivery contract below.
 
 Events omit content and storage coordinates, but include application metadata.
 See [Archive lifecycle events](archive-events.md) for the envelope and consumer

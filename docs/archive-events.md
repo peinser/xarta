@@ -16,11 +16,33 @@ documents.archive.<archive-token>.<document-uuid>.<event-token>
 `created`, `version-created`, `deletion-requested`, `deleted`, and
 `version-content-removed`.
 
-Delivery is at least once. Creation and version events publish after database commit, and an
-exact write replay republishes the same deterministic fact. Persisted deletion and retention
-intent is scanned at startup and periodically to recover commands lost after commit. A crash
-between a database commit and direct event publication can still lose an event; a retry after
-broker acceptance can duplicate it outside JetStream's duplicate window.
+Accepted JetStream events can be delivered more than once, subject to stream retention
+and consumer configuration. Creation and version events publish after database commit,
+and an exact write replay republishes the same deterministic fact. Persisted deletion
+and retention intent is scanned at startup and periodically to recover commands lost
+after commit.
+
+Final document deletion is recoverable through deletion-command redelivery. When a
+command finds an already-completed operation, it checks for a deleted tombstone matching
+the internal aggregate ID, archive, and public document ID. A matching tombstone causes
+`xarta.archive.document.deleted` to be published again before the command is acknowledged.
+An active/deleting document or a mismatched identity does not establish this fact.
+This also applies to an outstanding history command after the entire document is deleted.
+
+The first deleted-event publication and every retry use the tombstone's persisted deleted
+HEAD identities and `updated_at` timestamp. Finalization captures the authoritative HEAD
+under the aggregate lock, rather than an older HEAD carried by a history command. Event
+ID, occurrence time, and payload are therefore stable across retries. The database
+connection is released before awaiting PubAck. Publication failure leaves the command
+eligible for redelivery; an ambiguous PubAck or command ACK can cause duplicate publication.
+Consumers must tolerate duplicates outside the ten-minute JetStream deduplication window.
+
+Recovery depends on the deletion command remaining in the work queue and an enabled
+deletion consumer eventually processing it. There is no independent tombstone event scan.
+Deletion-requested publication and historical-content-removal publication while the
+document remains active still have post-commit loss windows. Repeating an HTTP DELETE
+against a tombstone returns 200 without publication. Final-state convergence does not
+promise delivery of every superseded historical transition or exactly-once delivery.
 
 ## Envelope
 

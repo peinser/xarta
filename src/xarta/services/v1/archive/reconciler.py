@@ -139,35 +139,34 @@ class ArchiveDeletionReconciler:
 
     async def process(self, command: DeletionCommand) -> None:
         should_delete = await DB.validate_deletion_command(command)
-        if not should_delete:
-            return
-        backend = self.storage.backend(command.backend, command.backend_revision)
-        with contextlib.suppress(FileNotFoundError):
-            await backend.delete(command.storage_key)
+        if should_delete:
+            backend = self.storage.backend(command.backend, command.backend_revision)
+            with contextlib.suppress(FileNotFoundError):
+                await backend.delete(command.storage_key)
 
-        completion = await DB.complete_deletion(command)
-        if command.kind == "history" and completion.version_transitioned:
-            await publish_archive_event(
-                self.jetstream,
-                event_type="xarta.archive.document.version-content-removed",
-                archive=command.archive,
-                document_id=command.document_id,
-                aggregate_id=command.aggregate_id,
-                version_internal_id=command.version_internal_id,
-                version_id=command.version_id,
-                outcome=command.history_policy,
-            )
-        if completion.finalized:
-            await publish_archive_event(
-                self.jetstream,
-                event_type="xarta.archive.document.deleted",
-                archive=command.archive,
-                document_id=command.document_id,
-                aggregate_id=command.aggregate_id,
-                version_internal_id=command.head_version_internal_id,
-                version_id=command.head_version_id,
-                outcome="deleted",
-            )
+            completion = await DB.complete_deletion(command)
+            if command.kind == "history" and completion.version_transitioned:
+                await publish_archive_event(
+                    self.jetstream,
+                    event_type="xarta.archive.document.version-content-removed",
+                    archive=command.archive,
+                    document_id=command.document_id,
+                    aggregate_id=command.aggregate_id,
+                    version_internal_id=command.version_internal_id,
+                    version_id=command.version_id,
+                    outcome=command.history_policy,
+                )
+            if completion.representation_transitioned and not completion.finalized:
+                return
+
+        # Completion may predate this delivery or race with it. Only a matching
+        # tombstone proves deletion; other stale commands do not emit an event.
+        await DB.publish_deleted_event(
+            self.jetstream,
+            archive=command.archive,
+            document_id=command.document_id,
+            aggregate_id=command.aggregate_id,
+        )
 
     async def republish_pending(self) -> int:
         from .nats import publish_deletion_command

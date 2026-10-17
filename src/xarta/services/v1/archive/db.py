@@ -923,12 +923,7 @@ class ArchivePostgresModel(SanicPostgresModel):
             )
             commands = [DeletionCommand(**dict(row), kind="document") for row in rows]
             if not commands:
-                await cls._finalize_tombstone(
-                    connection,
-                    aggregate["_id"],
-                    aggregate["head_version_id"],
-                    aggregate["head_version_internal_id"],
-                )
+                await cls._finalize_tombstone(connection, aggregate["_id"])
                 finalized = True
 
         await cls._publish_commands(commands)
@@ -944,33 +939,59 @@ class ArchivePostgresModel(SanicPostgresModel):
             occurred_at=now,
         )
         if finalized:
-            await publish_archive_event(
+            await cls.publish_deleted_event(
                 cls._jetstream(),
-                event_type="xarta.archive.document.deleted",
                 archive=archive,
                 document_id=document_id,
                 aggregate_id=aggregate["_id"],
-                version_internal_id=aggregate["head_version_internal_id"],
-                version_id=aggregate["head_version_id"],
-                outcome="deleted",
-                occurred_at=now,
             )
         return DeletionRequest(accepted=True)
 
-    @staticmethod
-    async def _finalize_tombstone(
-        connection: Connection,
+    @classmethod
+    async def publish_deleted_event(
+        cls,
+        jetstream,
+        *,
         aggregate_id: int,
-        head_version_id: UUID,
-        head_version_internal_id: int,
+        archive: str,
+        document_id: UUID,
     ) -> None:
+        async with cls.pool().acquire() as connection:
+            tombstone = await connection.fetchrow(
+                "SELECT deleted_head_version_id, deleted_head_version_internal_id, updated_at "
+                "FROM archive_documents WHERE _id = $1 AND archive = $2 "
+                "AND document_id = $3 AND lifecycle = 'deleted'",
+                aggregate_id,
+                archive,
+                document_id,
+            )
+        if tombstone is None:
+            return
+        # Initial publication and command redelivery use the same persisted fact.
+        # Release the database connection before waiting for JetStream's PubAck.
+        await publish_archive_event(
+            jetstream,
+            event_type="xarta.archive.document.deleted",
+            archive=archive,
+            document_id=document_id,
+            aggregate_id=aggregate_id,
+            version_internal_id=tombstone["deleted_head_version_internal_id"],
+            version_id=tombstone["deleted_head_version_id"],
+            outcome="deleted",
+            occurred_at=tombstone["updated_at"],
+        )
+
+    @staticmethod
+    async def _finalize_tombstone(connection: Connection, aggregate_id: int) -> None:
+        # Both callers hold the aggregate lock. A history command may carry an old
+        # HEAD, so capture the current database identity before removing versions.
         await connection.execute(
-            "UPDATE archive_documents SET lifecycle = 'deleted', head_version_id = NULL, "
-            "deleted_head_version_id = $2, deleted_head_version_internal_id = $3, "
-            "updated_at = now() WHERE _id = $1 AND lifecycle = 'deleting'",
+            "UPDATE archive_documents aggregate SET lifecycle = 'deleted', head_version_id = NULL, "
+            "deleted_head_version_id = head.version_id, deleted_head_version_internal_id = head._id, "
+            "updated_at = now() FROM archive_document_versions head "
+            "WHERE aggregate._id = $1 AND aggregate.lifecycle = 'deleting' "
+            "AND head._id = aggregate.head_version_id",
             aggregate_id,
-            head_version_id,
-            head_version_internal_id,
         )
         await connection.execute(
             "DELETE FROM archive_idempotency WHERE aggregate_id = $1", aggregate_id
@@ -1120,10 +1141,5 @@ class ArchivePostgresModel(SanicPostgresModel):
             )
             if remaining:
                 return DeletionCompletion(True, version_transitioned)
-            await cls._finalize_tombstone(
-                connection,
-                command.aggregate_id,
-                command.head_version_id,
-                command.head_version_internal_id,
-            )
+            await cls._finalize_tombstone(connection, command.aggregate_id)
             return DeletionCompletion(True, version_transitioned, finalized=True)

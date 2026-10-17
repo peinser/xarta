@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -18,6 +19,7 @@ from xarta.services.v1.archive.db import ArchivePostgresModel
 from xarta.services.v1.archive.db import DeletionCommand
 from xarta.services.v1.archive.db import DeletionCompletion
 from xarta.services.v1.archive.delete import _delete
+from xarta.services.v1.archive.events import archive_event_id
 from xarta.services.v1.archive.nats import publish_deletion_command
 from xarta.services.v1.archive.reconciler import ArchiveDeletionReconciler
 from xarta.services.v1.archive.reconciler import _start_reconciler
@@ -39,14 +41,21 @@ class FakePool:
     def __init__(self, connection) -> None:
         self.connection = connection
 
-    def acquire(self):
-        return AsyncContext(self.connection)
+    @asynccontextmanager
+    async def acquire(self):
+        self.connection.acquired += 1
+        try:
+            yield self.connection
+        finally:
+            self.connection.acquired -= 1
 
 
 class DeletionConnection:
     def __init__(self, aggregate=None, versions=None) -> None:
         self.aggregate = aggregate
         self.versions = versions or []
+        self.tombstone = None
+        self.acquired = 0
         self.queries: list[tuple[str, tuple]] = []
 
     def transaction(self):
@@ -54,6 +63,8 @@ class DeletionConnection:
 
     async def fetchrow(self, query, *args):
         self.queries.append((query, args))
+        if "SELECT deleted_head_version_id" in query:
+            return self.tombstone
         return self.aggregate
 
     async def fetch(self, query, *args):
@@ -327,18 +338,22 @@ async def test_missing_object_is_success_and_can_finalize(monkeypatch) -> None:
     )
     monkeypatch.setattr(ArchivePostgresModel, "complete_deletion", complete)
     event = AsyncMock()
-    monkeypatch.setattr(
-        "xarta.services.v1.archive.reconciler.publish_archive_event", event
-    )
+    monkeypatch.setattr(ArchivePostgresModel, "publish_deleted_event", event)
+    jetstream = object()
 
     await ArchiveDeletionReconciler(
         SimpleNamespace(backend=lambda *_args: backend),  # type: ignore[arg-type]
-        object(),
+        jetstream,
         300,
     ).process(current)
 
     complete.assert_awaited_once_with(current)
-    event.assert_awaited_once()
+    event.assert_awaited_once_with(
+        jetstream,
+        archive=current.archive,
+        document_id=current.document_id,
+        aggregate_id=current.aggregate_id,
+    )
 
 
 @pytest.mark.asyncio
@@ -352,15 +367,18 @@ async def test_stale_command_is_acked_without_storage_or_completion(
     )
     complete = AsyncMock()
     monkeypatch.setattr(ArchivePostgresModel, "complete_deletion", complete)
+    install_pool(monkeypatch, DeletionConnection())
+    jetstream = AsyncMock()
 
     await ArchiveDeletionReconciler(
         SimpleNamespace(backend=lambda *_args: backend),  # type: ignore[arg-type]
-        object(),
+        jetstream,
         300,
     ).process(current)
 
     backend.delete.assert_not_awaited()
     complete.assert_not_awaited()
+    jetstream.publish.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -379,14 +397,203 @@ async def test_history_event_requires_actual_transition(monkeypatch) -> None:
         "xarta.services.v1.archive.reconciler.publish_archive_event", event
     )
     backend = SimpleNamespace(delete=AsyncMock())
+    install_pool(monkeypatch, DeletionConnection())
+    jetstream = AsyncMock()
 
     await ArchiveDeletionReconciler(
         SimpleNamespace(backend=lambda *_args: backend),  # type: ignore[arg-type]
-        object(),
+        jetstream,
         300,
     ).process(current)
 
     event.assert_not_awaited()
+    jetstream.publish.assert_not_awaited()
+
+
+def tombstone():
+    return {
+        "deleted_head_version_id": uuid4(),
+        "deleted_head_version_internal_id": 29,
+        "updated_at": datetime.datetime(2030, 1, 2, 12, 30, tzinfo=datetime.UTC),
+    }
+
+
+def delivery(current):
+    return SimpleNamespace(
+        data=orjson.dumps(current.dict()),
+        metadata=SimpleNamespace(num_delivered=1),
+        nak=AsyncMock(),
+        ack=AsyncMock(),
+        term=AsyncMock(),
+        in_progress=AsyncMock(),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["document", "history"])
+@pytest.mark.parametrize("accepted_before_failure", [False, True])
+async def test_completed_deletion_redelivery_republishes_original_fact(
+    monkeypatch, kind, accepted_before_failure
+) -> None:
+    current = command(
+        kind=kind, policy="retain-metadata" if kind == "history" else None
+    )
+    connection = DeletionConnection()
+    install_pool(monkeypatch, connection)
+    stored = tombstone()  # The authoritative HEAD differs from the command's HEAD.
+    backend = SimpleNamespace(delete=AsyncMock())
+
+    async def validate(_command):
+        return connection.tombstone is None
+
+    async def complete(_command):
+        connection.tombstone = stored
+        return DeletionCompletion(True, True, finalized=True)
+
+    completion = AsyncMock(side_effect=complete)
+    monkeypatch.setattr(ArchivePostgresModel, "validate_deletion_command", validate)
+    monkeypatch.setattr(ArchivePostgresModel, "complete_deletion", completion)
+    attempts = []
+    accepted = []
+
+    async def publish(subject, payload, *, headers):
+        assert connection.acquired == 0
+        assert connection.tombstone == stored
+        if orjson.loads(payload)["type"] != "xarta.archive.document.deleted":
+            return
+        event = (subject, payload, headers["Nats-Msg-Id"])
+        attempts.append(event)
+        if len(attempts) == 1:
+            if accepted_before_failure:
+                accepted.append(event)
+            raise TimeoutError("PubAck unavailable")
+        accepted.append(event)
+
+    reconciler = ArchiveDeletionReconciler(
+        SimpleNamespace(backend=lambda *_args: backend),  # type: ignore[arg-type]
+        SimpleNamespace(publish=publish),
+        300,
+    )
+    first, retry = delivery(current), delivery(current)
+    retry.metadata.num_delivered = 2
+    await reconciler._process_message(first, asyncio.Semaphore(1))
+    first.nak.assert_awaited_once_with(delay=1.0)
+    first.ack.assert_not_awaited()
+    first.term.assert_not_awaited()
+    assert len(accepted) == int(accepted_before_failure)
+
+    await reconciler._process_message(retry, asyncio.Semaphore(1))
+    retry.ack.assert_awaited_once()
+    retry.nak.assert_not_awaited()
+    retry.term.assert_not_awaited()
+    backend.delete.assert_awaited_once_with(current.storage_key)
+    completion.assert_awaited_once_with(current)
+    assert len(accepted) == 1 + int(accepted_before_failure)
+    assert len(attempts) == 2
+    assert attempts[0] == attempts[1]
+    payload = orjson.loads(attempts[0][1])
+    assert payload["time"] == "2030-01-02T12:30:00Z"
+    assert payload["data"] == {
+        "archive": current.archive,
+        "document_id": str(current.document_id),
+        "version_id": str(stored["deleted_head_version_id"]),
+        "outcome": "deleted",
+    }
+    assert (
+        payload["id"]
+        == attempts[0][2]
+        == str(
+            archive_event_id(
+                "xarta.archive.document.deleted",
+                current.archive,
+                current.document_id,
+                current.aggregate_id,
+                stored["deleted_head_version_internal_id"],
+            )
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_overlapping_redelivery_waits_for_publication_before_ack(
+    monkeypatch,
+) -> None:
+    current = command()
+    connection = DeletionConnection()
+    install_pool(monkeypatch, connection)
+    backend = SimpleNamespace(delete=AsyncMock())
+
+    async def validate(_command):
+        return connection.tombstone is None
+
+    async def complete(_command):
+        connection.tombstone = tombstone()
+        return DeletionCompletion(True, True, finalized=True)
+
+    monkeypatch.setattr(ArchivePostgresModel, "validate_deletion_command", validate)
+    monkeypatch.setattr(ArchivePostgresModel, "complete_deletion", complete)
+    started = [asyncio.Event(), asyncio.Event()]
+    acknowledged = asyncio.Event()
+    attempts = []
+
+    async def publish(_subject, payload, *, headers):
+        assert connection.acquired == 0
+        attempts.append(payload)
+        started[len(attempts) - 1].set()
+        await acknowledged.wait()
+
+    reconciler = ArchiveDeletionReconciler(
+        SimpleNamespace(backend=lambda *_args: backend),  # type: ignore[arg-type]
+        SimpleNamespace(publish=publish),
+        300,
+    )
+    first, retry = delivery(current), delivery(current)
+    tasks = [
+        asyncio.create_task(reconciler._process_message(first, asyncio.Semaphore(1)))
+    ]
+    try:
+        await asyncio.wait_for(started[0].wait(), timeout=1)
+        tasks.append(
+            asyncio.create_task(
+                reconciler._process_message(retry, asyncio.Semaphore(1))
+            )
+        )
+        await asyncio.wait_for(started[1].wait(), timeout=1)
+        first.ack.assert_not_awaited()
+        retry.ack.assert_not_awaited()
+        acknowledged.set()
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=1)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    assert attempts[0] == attempts[1]
+    backend.delete.assert_awaited_once()
+    first.ack.assert_awaited_once()
+    retry.ack.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_deleted_event_lookup_requires_matching_identity_and_deleted_lifecycle(
+    monkeypatch,
+) -> None:
+    current = command()
+    connection = DeletionConnection()
+    install_pool(monkeypatch, connection)
+    jetstream = AsyncMock()
+
+    await ArchivePostgresModel.publish_deleted_event(
+        jetstream,
+        aggregate_id=current.aggregate_id,
+        archive=current.archive,
+        document_id=current.document_id,
+    )
+
+    jetstream.publish.assert_not_awaited()
+    query, args = connection.queries[0]
+    assert "WHERE _id = $1 AND archive = $2" in query
+    assert "AND document_id = $3 AND lifecycle = 'deleted'" in query
+    assert args == (current.aggregate_id, current.archive, current.document_id)
 
 
 @pytest.mark.asyncio
@@ -498,6 +705,15 @@ async def test_completion_clears_intent_and_finalizes_only_without_available_ver
     assert "DELETE FROM archive_idempotency" in sql
     assert "DELETE FROM archive_document_versions" in sql
     assert "DELETE FROM archive_documents" not in sql
+    query, args = next(
+        (query, args)
+        for query, args in connection.queries
+        if "SET lifecycle = 'deleted'" in query
+    )
+    assert "deleted_head_version_id = head.version_id" in query
+    assert "deleted_head_version_internal_id = head._id" in query
+    assert "head._id = aggregate.head_version_id" in query
+    assert args == (current.aggregate_id,)
 
 
 @pytest.mark.asyncio
