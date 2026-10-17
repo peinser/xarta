@@ -21,6 +21,15 @@ and an exact write replay republishes the same deterministic fact. Persisted doc
 deletion intent is scanned at startup and periodically to recover commands lost
 after commit.
 
+Deletion requests schedule work; only deletion-command completion finalizes a
+document. Supported writes always create at least one available representation.
+Partial deletion leaves available work, and the transaction completing the last
+representation also commits the tombstone under the aggregate lock. Consequently,
+a request sees either available work or an already-deleted document, never a
+committed intermediate state with no work and no tombstone. If manually altered or
+inconsistent database state violates this invariant, the request fails and its
+transaction rolls back instead of finalizing without a recoverable command.
+
 Final document deletion is recoverable through deletion-command redelivery. When a
 command finds an already-completed operation, it checks for a deleted tombstone matching
 the internal aggregate ID, archive, and public document ID. A matching tombstone causes
@@ -40,6 +49,13 @@ deletion consumer eventually processing it. There is no independent tombstone ev
 Deletion-requested publication still has a post-commit loss window. Repeating an HTTP DELETE
 against a tombstone returns 200 without publication. Final-state convergence does not
 promise delivery of every superseded historical transition or exactly-once delivery.
+
+`deletion-requested` is advisory: it provides early notice that the document is deleting,
+but consumers must not require it before processing `deleted`. The final `deleted` fact
+supersedes that notice. The search consumer may remove projections early on
+`deletion-requested` and also handles `deleted` independently. This is a notification
+contract, not fire-and-forget publication: the request handler still awaits publication,
+and a publication error can fail the HTTP request after its database transition committed.
 
 ## Envelope
 
@@ -86,7 +102,7 @@ contain sensitive application data, so `DOCUMENTS` access and retention must be 
 |---|---|
 | `xarta.archive.document.created` | First immutable snapshot becomes `HEAD` |
 | `xarta.archive.document.version-created` | A subsequent immutable snapshot becomes `HEAD` |
-| `xarta.archive.document.deletion-requested` | Aggregate changes from `active` to `deleting` |
+| `xarta.archive.document.deletion-requested` | Advisory early notice that the aggregate changes from `active` to `deleting`; not a prerequisite for `deleted` |
 | `xarta.archive.document.deleted` | All representation content is gone and the aggregate is finalized |
 
 Consumers must use archive, document, version, and representation identities rather than

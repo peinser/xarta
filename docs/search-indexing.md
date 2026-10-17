@@ -128,6 +128,9 @@ path. Versions are retained until the logical document is deleted.
 `deletion-requested` and `deleted` delete every projection for the archive and logical
 document. These operations are idempotent and archive-scoped.
 
+`deletion-requested` is advisory early cleanup. The consumer processes `deleted`
+independently, even if the earlier notification was never received.
+
 Archive remains the authoritative content and metadata store; search is a disposable
 projection and must not be used as an archive.
 

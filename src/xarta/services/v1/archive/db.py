@@ -829,8 +829,6 @@ class ArchivePostgresModel(SanicPostgresModel):
         from xarta.exceptions.http import ForbiddenError
         from xarta.exceptions.protocol import UnsafeArchiveDeleteError
 
-        commands: list[DeletionCommand] = []
-        finalized = False
         async with cls.pool().acquire() as connection, connection.transaction():
             aggregate = await connection.fetchrow(
                 "SELECT aggregate._id, aggregate.lifecycle, head._id AS head_version_internal_id, "
@@ -871,8 +869,12 @@ class ArchivePostgresModel(SanicPostgresModel):
             )
             commands = [DeletionCommand(**dict(row)) for row in rows]
             if not commands:
-                await cls._finalize_tombstone(connection, aggregate["_id"])
-                finalized = True
+                # The last representation's completion and the tombstone commit
+                # together under this same aggregate lock. No intermediate empty
+                # deleting document is visible to a supported request.
+                raise RuntimeError(
+                    "Non-deleted archive document has no available representations"
+                )
 
         await cls._publish_commands(commands)
         await publish_archive_event(
@@ -886,13 +888,6 @@ class ArchivePostgresModel(SanicPostgresModel):
             outcome="deletion_requested",
             occurred_at=now,
         )
-        if finalized:
-            await cls.publish_deleted_event(
-                cls._jetstream(),
-                archive=archive,
-                document_id=document_id,
-                aggregate_id=aggregate["_id"],
-            )
         return DeletionRequest(accepted=True)
 
     @classmethod
@@ -931,8 +926,8 @@ class ArchivePostgresModel(SanicPostgresModel):
 
     @staticmethod
     async def _finalize_tombstone(connection: Connection, aggregate_id: int) -> None:
-        # Both callers hold the aggregate lock. Capture the authoritative HEAD
-        # before removing versions.
+        # The completion transaction holds the aggregate lock. Capture the
+        # authoritative HEAD before removing versions.
         await connection.execute(
             "UPDATE archive_documents aggregate SET lifecycle = 'deleted', head_version_id = NULL, "
             "deleted_head_version_id = head.version_id, deleted_head_version_internal_id = head._id, "

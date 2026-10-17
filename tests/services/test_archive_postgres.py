@@ -384,6 +384,54 @@ async def test_document_only_upgrade_cancels_pending_history_cleanup(database):
     )
 
 
+@pytest.mark.parametrize("lifecycle", ["active", "deleting"])
+async def test_empty_non_deleted_document_fails_without_publication_or_state_change(
+    database, monkeypatch, lifecycle
+):
+    pool, migrate = database
+    await migrate("deploy", "--verify")
+    document_id = uuid4()
+    version_id = await add_version(pool, "invoices", document_id, {"revision": 1})
+    # Deliberately create an inconsistent state using SQL, bypassing the worker
+    # that would finalize the tombstone in this same transaction.
+    async with pool.acquire() as connection, connection.transaction():
+        await connection.execute(
+            "UPDATE archive_documents SET lifecycle = 'deleting' WHERE document_id = $1",
+            document_id,
+        )
+        await connection.execute(
+            "UPDATE archive_document_representations SET state = 'metadata-only', storage_key = NULL "
+            "WHERE version_internal_id = (SELECT _id FROM archive_document_versions WHERE version_id = $1)",
+            version_id,
+        )
+        await connection.execute(
+            "UPDATE archive_document_versions SET state = 'metadata-only' WHERE version_id = $1",
+            version_id,
+        )
+        await connection.execute(
+            "UPDATE archive_documents SET lifecycle = $2 WHERE document_id = $1",
+            document_id,
+            lifecycle,
+        )
+    before = await snapshot(pool)
+    jetstream = AsyncMock()
+    monkeypatch.setattr(
+        ArchivePostgresModel, "_jetstream", staticmethod(lambda: jetstream)
+    )
+
+    with pytest.raises(RuntimeError, match="no available representations"):
+        await ArchivePostgresModel.request_deletion(
+            "invoices",
+            document_id,
+            safe=False,
+            now=datetime.datetime.now(tz=datetime.UTC),
+        )
+
+    # Includes lifecycle, updated_at, HEAD, and all version/representation rows.
+    assert await snapshot(pool) == before
+    jetstream.publish.assert_not_awaited()
+
+
 async def test_all_versions_retained_until_logical_document_deletion(
     database, monkeypatch, tmp_path
 ):
