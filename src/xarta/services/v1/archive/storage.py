@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import re
 import uuid
 
 from collections.abc import Mapping
@@ -15,6 +14,7 @@ from zlib import crc32
 import aiofiles  # type: ignore[import-untyped]
 import aiofiles.os  # type: ignore[import-untyped]
 
+from xarta.protocol.document.archive import validate_archive_name
 from xarta.storage.s3 import S3ClientManager
 
 
@@ -292,8 +292,7 @@ class ArchiveStorageRegistry:
                 self._backends[(str(backend_name), revision)] = backend
 
         for archive, archive_configuration in archive_configurations.items():
-            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", str(archive)):
-                raise ValueError(f"Invalid archive name: {archive}")
+            archive = validate_archive_name(archive)
             backend_name = str(archive_configuration.get("backend"))
             if backend_name not in backend_revisions:
                 raise ValueError(

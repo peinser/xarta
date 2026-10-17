@@ -4,6 +4,10 @@ The `search-index` DAG node declaratively indexes one immutable document source
 version into a named destination. It performs no search queries and does not expose
 a retrieval-augmented generation (RAG) API.
 
+For authoritative lookup of current archived logical metadata, use the separate
+[archive metadata search API](archive-metadata-search.md). It queries the archive
+database directly and does not rely on these optional indexing projections.
+
 Search is deliberately independent from archive. Archiving a document never indexes
 it automatically, and a searchable document does not have to be archived. Archive is
 the authoritative content/version store; search destinations are disposable,

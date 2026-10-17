@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import re
 import time
 
 from dataclasses import dataclass
@@ -22,6 +21,7 @@ from xarta.protocol.document.archive import ARCHIVE_SERVICE_ENDPOINT
 from xarta.protocol.document.archive import ARCHIVE_SERVICE_TIMEOUT
 from xarta.protocol.document.archive import ArchiveDocumentVersion
 from xarta.protocol.document.archive import ArchiveRepresentation
+from xarta.protocol.document.archive import validate_archive_name
 from xarta.protocol.document.request.bundle import BUNDLE_SERVICE_ENDPOINT
 from xarta.protocol.document.request.bundle import BUNDLE_SERVICE_TIMEOUT
 from xarta.protocol.document.request.bundle import DocumentBundleRequest
@@ -200,9 +200,7 @@ class ArchiveDocumentSource(DocumentSource):
         representation: str | None = None,
     ):
         super().__init__(id=id, source=ArchiveDocumentSource.IDENTIFIER)
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", archive):
-            raise ValueError("Archive source requires a valid archive name")
-        self.archive = archive
+        self.archive = validate_archive_name(archive)
         self.version = str(UUID(version)) if version else None
         if representation and not version:
             raise ValueError("An exact archive representation requires a version")

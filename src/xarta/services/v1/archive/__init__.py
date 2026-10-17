@@ -6,6 +6,7 @@ from . import delete
 from . import details
 from . import download
 from . import reconciler
+from . import search
 from . import store
 from .base import bp
 

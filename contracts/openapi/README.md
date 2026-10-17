@@ -107,11 +107,12 @@ states rather than undocumented fields.
 
 ### Cursor-based collection responses
 
-Archive version collections and document-type collections use `items` plus
+Archive version collections, document-type collections, and metadata-search results use `items` plus
 `pagination: {limit, next}`. `limit` is the effective maximum batch size (1–100,
 default 50), even when fewer items are returned. `next` is an opaque token, not a
-URL or page number. Pass it unchanged as the next request's `cursor` query
-parameter, preserving the collection and query criteria. A null `next` ends
+URL or page number. Pass it unchanged as the next request's `cursor` parameter
+(query string for GET collections, JSON body for metadata search), preserving the
+collection and query criteria. A null `next` ends
 traversal; omit `cursor` to start again. The implementation uses indexed keyset
 queries and at most `limit + 1` result items, without offsets or total counts.
 
@@ -128,6 +129,13 @@ queries and at most `limit + 1` result items, without offsets or total counts.
 This is an actual empty-result shape. Archive collections additionally identify
 the document, archive, and current head. For nonempty continuation examples, see
 `DocumentTypesFirstPage` and `ArchiveVersionsFirstPage` in the contract.
+
+For authoritative metadata queries, start with `ArchiveMetadataSearchCustomer`,
+`ArchiveMetadataSearchFirst`, and `ArchiveMetadataSearchContinuation`. Results
+contain the exact HEAD version that matched. The query is read-only, does not
+require `search-index`, and deliberately excludes history and representation metadata.
+See [search semantics](../../docs/archive-metadata-search.md) and deploy the
+incremental `00001.archive-metadata-search` Sqitch change before enabling traffic.
 
 ### Maintaining the contract
 

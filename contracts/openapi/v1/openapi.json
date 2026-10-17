@@ -3,7 +3,7 @@
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "info": {
     "title": "Xarta HTTP and Workflow Capabilities API",
-    "version": "5.0.1",
+    "version": "5.1.0",
     "summary": "Contracts for all implemented Xarta v1 HTTP services and intake workflow nodes.",
     "description": "The union of independently deployable services. A deployment may expose only a subset; discover enabled workflow kinds at /api/v1/intake/capabilities. HTTP acceptance does not imply workflow completion. Canonical API paths are version-pinned; x-path-alias records the floating /api alias. Security requirements describe service-level enforcement only; ingress authorization is deployment-specific. NATS and MCP are separate protocols, not REST operations. See contracts/openapi/README.md for versioning and maintenance. Named examples use synthetic invoice/customer identities and reserved example domains. Unless explicitly tied to repository configuration or vendored UBL fixtures, destinations, templates, policies, provider references, timestamps, hashes and credentials are illustrative. Binary uploads/downloads use file-oriented x-codeSamples rather than fake JSON bytes. See contracts/openapi/README.md for the example scenarios and prerequisites.",
     "license": {
@@ -7877,6 +7877,403 @@
             "$ref": "#/components/responses/UnexpectedError"
           }
         }
+      }
+    },
+    "/api/v1/archive/archives/{archive}/documents/search": {
+      "x-path-alias": "/api/archive/archives/{archive}/documents/search",
+      "post": {
+        "operationId": "searchArchivedDocumentsScoped",
+        "summary": "Search logical metadata on current archived HEADs",
+        "tags": [
+          "archive"
+        ],
+        "description": "Read-only, authoritative PostgreSQL metadata search across all active documents in the selected archive. The default route selects archive=default. Only the current HEAD is matched; historical and representation metadata are excluded. Expiry alone does not exclude an active document. Scalar predicates are exact, typed, case-sensitive and AND-combined; nested objects use containment. Ordering is logical document UUID ascending. Fetches at most limit + 1 result rows to determine continuation, with no offsets or total-count query. Each request sees committed HEADs; concurrent writes can change membership between batches. Cursors bind archive and normalized filters, not batch size. Queries use the archive PostgreSQL pool command timeout; timeouts/connection failures return an error, never an empty success. A well-formed archive with no matches returns 200, including namespaces with no documents. Ingress access policy remains deployment-dependent. All search parameters must be in the JSON body; query-string parameters are rejected to prevent silently restarting a traversal with a misplaced cursor.",
+        "requestBody": {
+          "required": true,
+          "x-max-body-bytes": 16384,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchiveMetadataSearchRequest"
+              },
+              "examples": {
+                "customerInvoices": {
+                  "$ref": "#/components/examples/ArchiveMetadataSearchCustomer"
+                },
+                "continuation": {
+                  "$ref": "#/components/examples/ArchiveMetadataSearchContinuation"
+                },
+                "allHeads": {
+                  "$ref": "#/components/examples/ArchiveMetadataSearchAll"
+                },
+                "nestedAndNull": {
+                  "$ref": "#/components/examples/ArchiveMetadataSearchNested"
+                },
+                "untyped": {
+                  "$ref": "#/components/examples/ArchiveMetadataSearchUntyped"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Matching HEAD metadata and cursor continuation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveMetadataSearchResults"
+                },
+                "examples": {
+                  "firstBatch": {
+                    "$ref": "#/components/examples/ArchiveMetadataSearchFirst"
+                  },
+                  "finalBatch": {
+                    "$ref": "#/components/examples/ArchiveMetadataSearchLast"
+                  },
+                  "noMatches": {
+                    "$ref": "#/components/examples/ArchiveMetadataSearchEmpty"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "unsupportedFilter": {
+                    "summary": "unsupportedFilter",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "Unsupported filter fields: representation_metadata"
+                      }
+                    }
+                  },
+                  "invalidCursor": {
+                    "summary": "invalidCursor",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "cursor is invalid"
+                      }
+                    }
+                  },
+                  "misplacedCursor": {
+                    "summary": "misplacedCursor",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "Search parameters belong in the JSON body, not the query string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content Too Large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "tooLarge": {
+                    "summary": "tooLarge",
+                    "value": {
+                      "error": {
+                        "code": "content_too_large",
+                        "message": "Search request exceeds 16384 bytes."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "jsonRequired": {
+                    "summary": "jsonRequired",
+                    "value": {
+                      "error": {
+                        "code": "unsupported_media_type",
+                        "message": "Send an application/json search request."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "temporarilyUnavailable": {
+                    "summary": "temporarilyUnavailable",
+                    "value": {
+                      "error": {
+                        "code": "service_unavailable",
+                        "message": "Archive metadata search is temporarily unavailable."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected archive error; failures before route matching or at the gateway may use another format.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "internalError": {
+                    "summary": "Unexpected error",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "Search and continue using the JSON cursor field",
+            "source": "# Save ArchiveMetadataSearchCustomer as search.json.\ncurl --fail-with-body \"${XARTA_URL}/api/v1/archive/archives/default/documents/search\" \\\n  --header 'Content-Type: application/json' --data-binary @search.json\n# To continue, repeat the filter and copy pagination.next into the JSON cursor field.\n# Stop when pagination.next is null."
+          }
+        ],
+        "parameters": [
+          {
+            "name": "archive",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+            },
+            "example": "default",
+            "description": "Case-sensitive archive namespace. Must start with an ASCII letter/digit and contain only ASCII letters/digits, dots, underscores or hyphens."
+          }
+        ]
+      }
+    },
+    "/api/v1/archive/documents/search": {
+      "x-path-alias": "/api/archive/documents/search",
+      "post": {
+        "operationId": "searchArchivedDocumentsDefault",
+        "summary": "Search logical metadata on current archived HEADs",
+        "tags": [
+          "archive"
+        ],
+        "description": "Read-only, authoritative PostgreSQL metadata search across all active documents in the selected archive. The default route selects archive=default. Only the current HEAD is matched; historical and representation metadata are excluded. Expiry alone does not exclude an active document. Scalar predicates are exact, typed, case-sensitive and AND-combined; nested objects use containment. Ordering is logical document UUID ascending. Fetches at most limit + 1 result rows to determine continuation, with no offsets or total-count query. Each request sees committed HEADs; concurrent writes can change membership between batches. Cursors bind archive and normalized filters, not batch size. Queries use the archive PostgreSQL pool command timeout; timeouts/connection failures return an error, never an empty success. A well-formed archive with no matches returns 200, including namespaces with no documents. Ingress access policy remains deployment-dependent. All search parameters must be in the JSON body; query-string parameters are rejected to prevent silently restarting a traversal with a misplaced cursor.",
+        "requestBody": {
+          "required": true,
+          "x-max-body-bytes": 16384,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchiveMetadataSearchRequest"
+              },
+              "examples": {
+                "customerInvoices": {
+                  "$ref": "#/components/examples/ArchiveMetadataSearchCustomer"
+                },
+                "continuation": {
+                  "$ref": "#/components/examples/ArchiveMetadataSearchContinuation"
+                },
+                "allHeads": {
+                  "$ref": "#/components/examples/ArchiveMetadataSearchAll"
+                },
+                "nestedAndNull": {
+                  "$ref": "#/components/examples/ArchiveMetadataSearchNested"
+                },
+                "untyped": {
+                  "$ref": "#/components/examples/ArchiveMetadataSearchUntyped"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Matching HEAD metadata and cursor continuation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveMetadataSearchResults"
+                },
+                "examples": {
+                  "firstBatch": {
+                    "$ref": "#/components/examples/ArchiveMetadataSearchFirst"
+                  },
+                  "finalBatch": {
+                    "$ref": "#/components/examples/ArchiveMetadataSearchLast"
+                  },
+                  "noMatches": {
+                    "$ref": "#/components/examples/ArchiveMetadataSearchEmpty"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "unsupportedFilter": {
+                    "summary": "unsupportedFilter",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "Unsupported filter fields: representation_metadata"
+                      }
+                    }
+                  },
+                  "invalidCursor": {
+                    "summary": "invalidCursor",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "cursor is invalid"
+                      }
+                    }
+                  },
+                  "misplacedCursor": {
+                    "summary": "misplacedCursor",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "Search parameters belong in the JSON body, not the query string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content Too Large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "tooLarge": {
+                    "summary": "tooLarge",
+                    "value": {
+                      "error": {
+                        "code": "content_too_large",
+                        "message": "Search request exceeds 16384 bytes."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "jsonRequired": {
+                    "summary": "jsonRequired",
+                    "value": {
+                      "error": {
+                        "code": "unsupported_media_type",
+                        "message": "Send an application/json search request."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "temporarilyUnavailable": {
+                    "summary": "temporarilyUnavailable",
+                    "value": {
+                      "error": {
+                        "code": "service_unavailable",
+                        "message": "Archive metadata search is temporarily unavailable."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected archive error; failures before route matching or at the gateway may use another format.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "internalError": {
+                    "summary": "Unexpected error",
+                    "value": {
+                      "error": {
+                        "code": "internal_server_error",
+                        "message": "An unexpected archive error occurred."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "Search and continue using the JSON cursor field",
+            "source": "# Save ArchiveMetadataSearchCustomer as search.json.\ncurl --fail-with-body \"${XARTA_URL}/api/v1/archive/documents/search\" \\\n  --header 'Content-Type: application/json' --data-binary @search.json\n# To continue, repeat the filter and copy pagination.next into the JSON cursor field.\n# Stop when pagination.next is null."
+          }
+        ]
       }
     }
   },
@@ -18774,7 +19171,7 @@
               "null"
             ],
             "minLength": 1,
-            "description": "Opaque continuation token, or null when no further results exist. Pass a non-null value unchanged as the next request's cursor query parameter, with the same collection and query criteria. This is not a URL or page number; do not decode or construct it. Omit cursor to restart traversal."
+            "description": "Opaque continuation token, or null when no further results exist. Pass a non-null value unchanged as the next request's cursor parameter: query string for GET collections, JSON body for archive metadata search. Preserve collection and filter criteria. This is not a URL or page number; do not decode or construct it. Omit cursor to restart traversal."
           }
         },
         "required": [
@@ -18790,6 +19187,309 @@
           {
             "limit": 50,
             "next": null
+          }
+        ]
+      },
+      "ArchiveMetadataFilterValue": {
+        "oneOf": [
+          {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ],
+            "pattern": "^[^\\u0000]*$"
+          },
+          {
+            "type": "object",
+            "minProperties": 1,
+            "propertyNames": {
+              "pattern": "^[^\\u0000]*$"
+            },
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ArchiveMetadataFilterValue"
+            }
+          }
+        ],
+        "description": "An exact scalar value or a nonempty nested object of scalar matches. Types are preserved; strings are case-sensitive; null requires an explicitly stored JSON null. Arrays, empty nested containers, NUL characters, nonfinite numbers, operators and JSONPath expressions are unsupported. Metadata keys are literal keys, including dots.",
+        "examples": [
+          "CUST-0042",
+          2026,
+          false,
+          null,
+          {
+            "country": "BE"
+          }
+        ]
+      },
+      "ArchiveMetadataFilter": {
+        "type": "object",
+        "propertyNames": {
+          "pattern": "^[^\\u0000]*$"
+        },
+        "additionalProperties": {
+          "$ref": "#/components/schemas/ArchiveMetadataFilterValue"
+        },
+        "description": "AND-combined containment matches against logical metadata of the current HEAD only. Additional stored fields are allowed. Empty root means no metadata restriction. At most eight nested object levels below this root; arrays and representation metadata are not searchable.",
+        "x-max-nesting-depth": 8,
+        "examples": [
+          {
+            "customer_id": "CUST-0042",
+            "fiscal_year": 2026
+          },
+          {
+            "customer": {
+              "country": "BE"
+            },
+            "approved": false,
+            "external_reference": null
+          }
+        ]
+      },
+      "ArchiveMetadataSearchFilter": {
+        "type": "object",
+        "properties": {
+          "document_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "pattern": "^[^\\u0000]*$",
+            "description": "Exact document type. Omit for any type; explicit null selects untyped HEADs."
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ArchiveMetadataFilter"
+          }
+        },
+        "additionalProperties": false,
+        "examples": [
+          {
+            "document_type": "invoice",
+            "metadata": {
+              "customer_id": "CUST-0042",
+              "fiscal_year": 2026
+            }
+          },
+          {
+            "document_type": null,
+            "metadata": {
+              "imported": true
+            }
+          }
+        ]
+      },
+      "ArchiveMetadataSearchRequest": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "$ref": "#/components/schemas/ArchiveMetadataSearchFilter"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50,
+            "description": "Maximum batch size; may change during continuation. Booleans, strings, floats and null are rejected."
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "Pass the previous pagination.next unchanged in this JSON field, repeating the same filter. Omit on the first request; null is not accepted. Bound to archive, normalized filter, HEAD scope and document-ID order, but not limit. Tokens are opaque continuation positions, not authorization credentials."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Read-only archive search. A request with no filter traverses all active HEADs in this archive. Empty filter.metadata is normalized to omission; filter object key ordering is irrelevant. Other filter values must be repeated on continuation. Unknown request/filter fields are rejected. The UTF-8 request body is limited to 16384 bytes.",
+        "examples": [
+          {
+            "filter": {
+              "document_type": "invoice",
+              "metadata": {
+                "customer_id": "CUST-0042",
+                "fiscal_year": 2026
+              }
+            },
+            "limit": 1
+          },
+          {
+            "filter": {
+              "document_type": "invoice",
+              "metadata": {
+                "customer_id": "CUST-0042",
+                "fiscal_year": 2026
+              }
+            },
+            "limit": 50,
+            "cursor": "eyJzY29wZSI6ImFyY2hpdmUtaGVhZC1tZXRhZGF0YTp2MTo4ZjA1YmQ3NGE4ZTNlNDEyNDNhMjQ4ZmM3ZDQ4YzM1MWExZmNlMTI3MzJmMjdkZWQ1Y2FkYzMzYzRmYzU5ZTAxIiwidmFsdWVzIjp7ImRvY3VtZW50X2lkIjoiYzNiZTkwZTAtMjRhYi01ZDM4LWEzOWQtMzE0OWRiOTdhZTIyIn0sInZlcnNpb24iOjF9"
+          },
+          {
+            "limit": 50
+          }
+        ]
+      },
+      "ArchiveMetadataMatch": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Logical document identity within the enclosing archive."
+          },
+          "version": {
+            "$ref": "#/components/schemas/ArchiveVersionIdentity"
+          },
+          "document_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Complete logical metadata of the matched immutable HEAD version; not representation metadata."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "version",
+          "document_type",
+          "metadata",
+          "created_at",
+          "expires_at"
+        ],
+        "description": "Lightweight metadata result with the exact version that matched. Use version.id for subsequent content/details retrieval to avoid switching to a newer HEAD. No representation aggregation or byte-storage access is performed by search.",
+        "examples": [
+          {
+            "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+            "version": {
+              "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+              "parent": null
+            },
+            "document_type": "invoice",
+            "metadata": {
+              "invoice_number": "INV-2026-0042",
+              "customer_id": "CUST-0042",
+              "department": "accounts-receivable",
+              "fiscal_year": 2026
+            },
+            "created_at": "2026-10-14T09:30:00+00:00",
+            "expires_at": "2036-10-14T09:30:00+00:00"
+          },
+          {
+            "id": "d28d1305-01e5-4afc-b2cb-c34ce8bc8b29",
+            "version": {
+              "id": "75e30e09-31dc-4267-8dea-94e09427619d",
+              "parent": null
+            },
+            "document_type": "invoice",
+            "metadata": {
+              "invoice_number": "INV-2026-0043",
+              "customer_id": "CUST-0042",
+              "department": "accounts-receivable",
+              "fiscal_year": 2026
+            },
+            "created_at": "2026-10-15T09:30:00+00:00",
+            "expires_at": "2036-10-14T09:30:00+00:00"
+          }
+        ]
+      },
+      "ArchiveMetadataSearchResults": {
+        "type": "object",
+        "properties": {
+          "archive": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/ArchiveMetadataMatch"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/CursorPagination"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "archive",
+          "items",
+          "pagination"
+        ],
+        "examples": [
+          {
+            "archive": "default",
+            "items": [
+              {
+                "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+                "version": {
+                  "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+                  "parent": null
+                },
+                "document_type": "invoice",
+                "metadata": {
+                  "invoice_number": "INV-2026-0042",
+                  "customer_id": "CUST-0042",
+                  "department": "accounts-receivable",
+                  "fiscal_year": 2026
+                },
+                "created_at": "2026-10-14T09:30:00+00:00",
+                "expires_at": "2036-10-14T09:30:00+00:00"
+              }
+            ],
+            "pagination": {
+              "limit": 1,
+              "next": "eyJzY29wZSI6ImFyY2hpdmUtaGVhZC1tZXRhZGF0YTp2MTo4ZjA1YmQ3NGE4ZTNlNDEyNDNhMjQ4ZmM3ZDQ4YzM1MWExZmNlMTI3MzJmMjdkZWQ1Y2FkYzMzYzRmYzU5ZTAxIiwidmFsdWVzIjp7ImRvY3VtZW50X2lkIjoiYzNiZTkwZTAtMjRhYi01ZDM4LWEzOWQtMzE0OWRiOTdhZTIyIn0sInZlcnNpb24iOjF9"
+            }
+          },
+          {
+            "archive": "default",
+            "items": [
+              {
+                "id": "d28d1305-01e5-4afc-b2cb-c34ce8bc8b29",
+                "version": {
+                  "id": "75e30e09-31dc-4267-8dea-94e09427619d",
+                  "parent": null
+                },
+                "document_type": "invoice",
+                "metadata": {
+                  "invoice_number": "INV-2026-0043",
+                  "customer_id": "CUST-0042",
+                  "department": "accounts-receivable",
+                  "fiscal_year": 2026
+                },
+                "created_at": "2026-10-15T09:30:00+00:00",
+                "expires_at": "2036-10-14T09:30:00+00:00"
+              }
+            ],
+            "pagination": {
+              "limit": 50,
+              "next": null
+            }
+          },
+          {
+            "archive": "default",
+            "items": [],
+            "pagination": {
+              "limit": 50,
+              "next": null
+            }
           }
         ]
       }
@@ -23801,6 +24501,134 @@
             "next": null
           }
         }
+      },
+      "ArchiveMetadataSearchCustomer": {
+        "summary": "Find invoices by customer and numeric fiscal year",
+        "value": {
+          "filter": {
+            "document_type": "invoice",
+            "metadata": {
+              "customer_id": "CUST-0042",
+              "fiscal_year": 2026
+            }
+          },
+          "limit": 1
+        }
+      },
+      "ArchiveMetadataSearchContinuation": {
+        "summary": "Continue the same query with a larger batch",
+        "value": {
+          "filter": {
+            "document_type": "invoice",
+            "metadata": {
+              "customer_id": "CUST-0042",
+              "fiscal_year": 2026
+            }
+          },
+          "limit": 50,
+          "cursor": "eyJzY29wZSI6ImFyY2hpdmUtaGVhZC1tZXRhZGF0YTp2MTo4ZjA1YmQ3NGE4ZTNlNDEyNDNhMjQ4ZmM3ZDQ4YzM1MWExZmNlMTI3MzJmMjdkZWQ1Y2FkYzMzYzRmYzU5ZTAxIiwidmFsdWVzIjp7ImRvY3VtZW50X2lkIjoiYzNiZTkwZTAtMjRhYi01ZDM4LWEzOWQtMzE0OWRiOTdhZTIyIn0sInZlcnNpb24iOjF9"
+        },
+        "description": "The cursor is generated by the actual cursor encoder for this filter and last document identity; it is illustrative, not a live search result."
+      },
+      "ArchiveMetadataSearchAll": {
+        "summary": "Bounded traversal of all active HEADs",
+        "value": {
+          "limit": 50
+        }
+      },
+      "ArchiveMetadataSearchNested": {
+        "summary": "Nested fields, boolean false and explicit null",
+        "value": {
+          "filter": {
+            "metadata": {
+              "customer": {
+                "country": "BE"
+              },
+              "approved": false,
+              "external_reference": null
+            }
+          },
+          "limit": 50
+        },
+        "description": "These metadata keys must exist on the HEAD. A null filter value does not match a missing key."
+      },
+      "ArchiveMetadataSearchUntyped": {
+        "summary": "Find HEADs with no document type",
+        "value": {
+          "filter": {
+            "document_type": null
+          }
+        }
+      },
+      "ArchiveMetadataSearchFirst": {
+        "summary": "A matching HEAD and a continuation cursor",
+        "value": {
+          "archive": "default",
+          "items": [
+            {
+              "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
+              "version": {
+                "id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+                "parent": null
+              },
+              "document_type": "invoice",
+              "metadata": {
+                "invoice_number": "INV-2026-0042",
+                "customer_id": "CUST-0042",
+                "department": "accounts-receivable",
+                "fiscal_year": 2026
+              },
+              "created_at": "2026-10-14T09:30:00+00:00",
+              "expires_at": "2036-10-14T09:30:00+00:00"
+            }
+          ],
+          "pagination": {
+            "limit": 1,
+            "next": "eyJzY29wZSI6ImFyY2hpdmUtaGVhZC1tZXRhZGF0YTp2MTo4ZjA1YmQ3NGE4ZTNlNDEyNDNhMjQ4ZmM3ZDQ4YzM1MWExZmNlMTI3MzJmMjdkZWQ1Y2FkYzMzYzRmYzU5ZTAxIiwidmFsdWVzIjp7ImRvY3VtZW50X2lkIjoiYzNiZTkwZTAtMjRhYi01ZDM4LWEzOWQtMzE0OWRiOTdhZTIyIn0sInZlcnNpb24iOjF9"
+          }
+        },
+        "description": "There are additional matching documents in this illustrative query. Search reflects committed HEAD state per request, not a frozen cross-request snapshot."
+      },
+      "ArchiveMetadataSearchLast": {
+        "summary": "Final batch after continuation",
+        "value": {
+          "archive": "default",
+          "items": [
+            {
+              "id": "d28d1305-01e5-4afc-b2cb-c34ce8bc8b29",
+              "version": {
+                "id": "75e30e09-31dc-4267-8dea-94e09427619d",
+                "parent": null
+              },
+              "document_type": "invoice",
+              "metadata": {
+                "invoice_number": "INV-2026-0043",
+                "customer_id": "CUST-0042",
+                "department": "accounts-receivable",
+                "fiscal_year": 2026
+              },
+              "created_at": "2026-10-15T09:30:00+00:00",
+              "expires_at": "2036-10-14T09:30:00+00:00"
+            }
+          ],
+          "pagination": {
+            "limit": 50,
+            "next": null
+          }
+        },
+        "description": "One item remains although the effective limit is 50; next is null."
+      },
+      "ArchiveMetadataSearchEmpty": {
+        "summary": "No matching active HEADs",
+        "value": {
+          "archive": "default",
+          "items": [],
+          "pagination": {
+            "limit": 50,
+            "next": null
+          }
+        },
+        "description": "A well-formed archive name with no active documents also returns this empty 200 shape; search does not require a storage registry or search-index projection."
       }
     }
   }

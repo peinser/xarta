@@ -34,6 +34,10 @@ the business inputs a caller is allowed to provide.
 Capabilities are deployment-specific. An intake service advertises only the node kinds
 its workers can actually execute.
 
+The archive also supports [authoritative HEAD metadata search](docs/archive-metadata-search.md)
+with typed logical-metadata filters and cursor-based traversal, independently of
+optional search-index destinations.
+
 The [versioned OpenAPI contracts](contracts/openapi/README.md) describe the HTTP APIs,
 workflow-node inputs and outcomes, callbacks, and postal-station operations. Start with
 [`contracts/openapi/v1/openapi.json`](contracts/openapi/v1/openapi.json).

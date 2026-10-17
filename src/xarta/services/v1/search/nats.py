@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
 
 from dataclasses import dataclass
 from functools import partial
@@ -23,6 +22,7 @@ from xarta.protocol.dag import OutcomeEmission
 from xarta.protocol.dag import OutcomeSubject
 from xarta.protocol.dag.search import SearchIndexNode
 from xarta.protocol.dag.search import SearchIndexOutcome
+from xarta.protocol.document.archive import validate_archive_name
 from xarta.protocol.document.source import ArchiveDocumentSource
 from xarta.services.v1.search.adapters import SearchTransportError
 from xarta.services.v1.search.models import ArchiveSearchSource
@@ -168,7 +168,6 @@ _ARCHIVE_EVENTS = {
     "xarta.archive.document.deletion-requested",
     "xarta.archive.document.deleted",
 }
-_ARCHIVE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def _archive_event(data: bytes) -> tuple[str, str, UUID, UUID | None]:
@@ -176,7 +175,7 @@ def _archive_event(data: bytes) -> tuple[str, str, UUID, UUID | None]:
         event = orjson.loads(data)
         event_type = event["type"]
         payload = event["data"]
-        archive = payload["archive"]
+        archive = validate_archive_name(payload["archive"])
         document_id = UUID(payload["document_id"])
         version_value = payload.get("version_id")
         version_id = UUID(version_value) if version_value is not None else None
@@ -186,11 +185,7 @@ def _archive_event(data: bytes) -> tuple[str, str, UUID, UUID | None]:
             classification="malformed",
             error_code="malformed_archive_event",
         ) from ex
-    if (
-        event_type not in _ARCHIVE_EVENTS
-        or not isinstance(archive, str)
-        or not _ARCHIVE_NAME.fullmatch(archive)
-    ):
+    if event_type not in _ARCHIVE_EVENTS:
         raise PermanentError(
             "Malformed archive lifecycle event",
             classification="malformed",

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime
-import re
 
 from dataclasses import dataclass
 from dataclasses import field
@@ -12,6 +11,7 @@ from uuid import UUID
 import xarta.protocol.dag
 
 from xarta.protocol.dag import Node
+from xarta.protocol.document.archive import validate_archive_name
 from xarta.protocol.document.source import DocumentSource
 from xarta.protocol.document.source import parse as parse_source
 
@@ -79,11 +79,8 @@ class ArchiveVersionSpecification:
     @staticmethod
     def fromdict(specification: Mapping[str, Any]) -> ArchiveVersionSpecification:
         archive = specification.get("archive")
-        if archive is not None and (
-            not isinstance(archive, str)
-            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", archive)
-        ):
-            raise ValueError("Archive snapshot requires a valid archive name")
+        if archive is not None:
+            archive = validate_archive_name(archive)
         metadata = specification.get("metadata", {})
         if not isinstance(metadata, dict):
             raise ValueError("Archive snapshot metadata must be an object")

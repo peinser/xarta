@@ -37,10 +37,12 @@ class Page(Generic[T]):
 
 
 def parse_limit(
-    value: str | None, *, default: int, maximum: int, minimum: int = 1
+    value: str | int | None, *, default: int, maximum: int, minimum: int = 1
 ) -> int:
     if value is None:
         return default
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise PaginationError("limit must be an integer")
     try:
         limit = int(value)
     except ValueError as ex:
@@ -59,13 +61,15 @@ def encode_cursor(scope: str, values: Mapping[str, str]) -> str:
 
 
 def decode_cursor(value: str, *, scope: str, keys: frozenset[str]) -> Mapping[str, str]:
-    if not value or len(value) > MAX_CURSOR_LENGTH:
+    if not isinstance(value, str) or not value or len(value) > MAX_CURSOR_LENGTH:
         raise PaginationError("cursor is invalid")
     try:
-        decoded = base64.urlsafe_b64decode(value)
+        decoded = base64.b64decode(value, altchars=b"-_", validate=True)
         payload = orjson.loads(decoded)
         if (
             not isinstance(payload, dict)
+            or set(payload) != {"version", "scope", "values"}
+            or type(payload["version"]) is not int
             or payload.get("version") != 1
             or payload.get("scope") != scope
             or not isinstance(payload.get("values"), dict)

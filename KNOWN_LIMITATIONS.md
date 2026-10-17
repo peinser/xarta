@@ -44,17 +44,22 @@ orphan reclamation must protect in-flight/uncertain writes as well as check
 committed database references before deleting bytes. A missing visible row alone
 is not sufficient evidence that an allocation is safe to delete.
 
-## Authoritative archive metadata search — planned scope
+## Authoritative archive metadata search
 
-The metadata-search API is under design and is not implemented yet. Its initial
-scope is deliberately limited:
+The archive metadata-search API has the following deliberate limits:
 
-- Only the current HEAD version of each logical document will be searched.
-  Historical version metadata will not be searched, even when an older version
+- Only the current HEAD version of each logical document is searched.
+  Historical version metadata is not searched, even when an older version
   would match a filter that the current HEAD does not.
-- Only logical document metadata, as stored on the HEAD version, will be searchable.
-  Representation metadata will not participate in matching.
+- Only logical document metadata, as stored on the HEAD version, is searchable.
+  Representation metadata does not participate in matching.
+- Filters use exact typed scalar matches and nested objects combined with AND.
+  Arrays, range/OR/wildcard predicates and arbitrary query expressions are not supported.
+- Cursor traversal observes committed HEAD state per request, not a frozen snapshot
+  across requests or a change feed. Concurrent updates can change membership.
 
-The intended source is the authoritative archive database, covering archived
+The source is the authoritative archive database, covering archived
 documents without requiring an explicit `search-index` workflow step. This is
 separate from the existing optional search-index projections.
+See [archive metadata search](docs/archive-metadata-search.md) for limits, cursor
+semantics, and deployment/indexing requirements.

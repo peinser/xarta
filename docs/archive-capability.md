@@ -470,6 +470,15 @@ compensate.
 
 ## Retrieval and document sources
 
+### Authoritative metadata search
+
+`POST /api/v1/archive/archives/{archive}/documents/search` (or the default archive
+alias `/api/v1/archive/documents/search`) provides read-only, cursor-based lookup
+of logical metadata on active HEADs. All archived documents are eligible without
+a `search-index` node. It searches neither historical nor representation metadata.
+See [metadata search](archive-metadata-search.md) for the JSON filter contract,
+examples, live traversal semantics and required Sqitch index upgrade.
+
 ### HTTP routes
 
 All paths below are relative to `/api/v1/archive/archives/{archive}`. Equivalent

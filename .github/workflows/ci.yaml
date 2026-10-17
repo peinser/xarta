@@ -32,6 +32,7 @@ jobs:
           --health-retries 10
     env:
       TRACKING_POSTGRES_TEST_DSN: postgresql://dev:dev@localhost:5432/dev
+      ARCHIVE_POSTGRES_TEST_DSN: postgresql://dev:dev@localhost:5432/postgres
     steps:
       - name: Git checkout
         uses: actions/checkout@v4
@@ -46,6 +47,8 @@ jobs:
         run: uv python install 3.13
       - name: Install dependencies
         run: uv sync --frozen --all-groups
+      - name: Install Sqitch for archive upgrade integration tests
+        run: sudo apt-get update && sudo apt-get install -y sqitch libdbd-pg-perl
       - name: Verify immutable flow profile history
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}

@@ -105,6 +105,8 @@ def snapshot_request(manifest: dict, files: dict[str, bytes]):
 def test_archive_routes_expose_head_versions_and_representations() -> None:
     routes = {route.uri for route in bp._future_routes}
     assert {
+        "/archives/<archive:str>/documents/search",
+        "/documents/search",
         "/archives/<archive:str>/documents/<document_id:uuid>/representations",
         "/archives/<archive:str>/documents/<document_id:uuid>/versions",
         "/archives/<archive:str>/documents/<document_id:uuid>/versions/<version_id:uuid>",

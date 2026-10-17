@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import re
 
 from dataclasses import dataclass
 from dataclasses import field
@@ -19,6 +20,17 @@ ARCHIVE_SERVICE_ENDPOINT = env.extract(key="ARCHIVE_SERVICE_ENDPOINT", dtype=str
 ARCHIVE_SERVICE_TIMEOUT = env.extract(
     key="ARCHIVE_SERVICE_TIMEOUT", default="30.0", dtype=float
 )
+
+_ARCHIVE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def validate_archive_name(value: object) -> str:
+    """Validate an archive namespace without coercing or normalizing its identity."""
+    if not isinstance(value, str) or not _ARCHIVE_NAME.fullmatch(value):
+        raise ValueError(
+            "archive must start with an ASCII letter or digit and contain only letters, digits, dots, underscores, or hyphens"
+        )
+    return value
 
 
 @dataclass(frozen=True)

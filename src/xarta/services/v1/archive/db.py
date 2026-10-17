@@ -804,6 +804,60 @@ class ArchivePostgresModel(SanicPostgresModel):
         )
 
     @classmethod
+    async def search_heads(
+        cls,
+        archive: str,
+        filters: dict[str, Any],
+        *,
+        limit: int,
+        after: UUID | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        parameters: list[Any] = [archive]
+        predicates = ["aggregate.archive = $1", "aggregate.lifecycle = 'active'"]
+        if "document_type" in filters:
+            if filters["document_type"] is None:
+                predicates.append("version.document_type IS NULL")
+            else:
+                parameters.append(filters["document_type"])
+                predicates.append(f"version.document_type = ${len(parameters)}")
+        if "metadata" in filters:
+            parameters.append(orjson.dumps(filters["metadata"]).decode())
+            predicates.append(f"version.metadata @> ${len(parameters)}::jsonb")
+        if after is not None:
+            parameters.append(after)
+            predicates.append(f"aggregate.document_id > ${len(parameters)}::uuid")
+        parameters.append(limit + 1)
+        query = (
+            "SELECT aggregate.document_id, version.version_id, parent.version_id AS parent_version_id, "
+            "version.document_type, version.metadata, version.created, version.expires "
+            "FROM archive_documents aggregate "
+            "JOIN archive_document_versions version ON version._id = aggregate.head_version_id "
+            "LEFT JOIN archive_document_versions parent ON parent._id = version.parent_version_id "
+            "WHERE " + " AND ".join(predicates) + " ORDER BY aggregate.document_id ASC "
+            f"LIMIT ${len(parameters)}"
+        )
+        async with cls.pool().acquire() as connection:
+            rows = await connection.fetch(query, *parameters)
+        return tuple(
+            {
+                "id": str(row["document_id"]),
+                "version": {
+                    "id": str(row["version_id"]),
+                    "parent": (
+                        str(row["parent_version_id"])
+                        if row["parent_version_id"]
+                        else None
+                    ),
+                },
+                "document_type": row["document_type"],
+                "metadata": cls._json(row["metadata"]),
+                "created_at": row["created"].isoformat(),
+                "expires_at": row["expires"].isoformat() if row["expires"] else None,
+            }
+            for row in rows
+        )
+
+    @classmethod
     async def exists(cls, identifiers: set[UUID], archive: str = "default") -> bool:
         async with cls.pool().acquire() as connection:
             count = await connection.fetchval(

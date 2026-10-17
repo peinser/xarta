@@ -3,3 +3,4 @@
 %uri=https://github.com/peinser/xarta
 
 00000.archive 2026-08-30T00:00:00Z Xarta Labs <xarta@peinser.com> # Immutable version snapshots and representations
+00001.archive-metadata-search [00000.archive] 2026-10-16T00:00:00Z Xarta Labs <xarta@peinser.com> # Concurrent GIN index for authoritative HEAD metadata search

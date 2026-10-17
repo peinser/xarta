@@ -4,12 +4,15 @@ import datetime
 
 from uuid import uuid4
 
+import pytest
+
 import xarta.protocol.dag
 
 from xarta.protocol.dag.node import Node
 from xarta.protocol.document import Document
 from xarta.protocol.document.archive import ArchiveDocumentVersion
 from xarta.protocol.document.archive import ArchiveRepresentation
+from xarta.protocol.document.archive import validate_archive_name
 from xarta.protocol.document.request.flow import DocumentFlowRequest
 from xarta.protocol.template.engine import TemplateEngineIdentifier
 from xarta.protocol.template.engine import TemplateEngineKind
@@ -23,6 +26,20 @@ def test_document_created_default_is_current_and_timezone_aware() -> None:
 
     assert before <= document.created <= after
     assert document.created.tzinfo is datetime.UTC
+
+
+@pytest.mark.parametrize("value", ["default", "Payroll.EU", "archive-2026_10", "7"])
+def test_archive_name_validation_preserves_identity(value):
+    assert validate_archive_name(value) == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, 7, True, "", " ", ".hidden", "../archive", "a/b", "é", "archive\n", "a\0b"],
+)
+def test_archive_name_validation_rejects_invalid_names(value):
+    with pytest.raises(ValueError, match="archive"):
+        validate_archive_name(value)
 
 
 def test_archive_version_round_trip_keeps_representation_metadata_separate() -> None:

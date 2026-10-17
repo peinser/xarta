@@ -1,5 +1,20 @@
 # HTTP API v1 contract revisions
 
+## 5.1.0 — 2026-10-17
+
+- Add read-only authoritative HEAD metadata search at the scoped and default
+  archive `POST .../documents/search` endpoints. Accept exact typed scalar and
+  nested-object filters, optional document type (including null), and bounded limits.
+- Return lightweight logical metadata with the matching immutable version identity
+  and the existing `pagination: {limit, next}` envelope. Continuation is submitted
+  in the JSON `cursor` field, bound to archive, normalized filter, HEAD scope and
+  ordering. No offsets or total counts; empty queries traverse active HEADs.
+- Document body/depth bounds, supported predicates, expiry/lifecycle visibility,
+  live cursor semantics, empty results, and 400/413/415/503 errors. Add representative
+  request/response examples and the concurrent GIN-index deployment requirement.
+- Harden the shared cursor decoder against invalid envelope types, unsupported
+  versions and non-base64 input, and reject non-integer limits without truncation.
+  Existing valid GET collection requests and server-issued cursors remain compatible.
 ## 5.0.1 — 2026-10-16
 
 - Fix archive compensation ownership: independent submissions use private physical
