@@ -40,7 +40,8 @@ optional search-index destinations.
 
 The [versioned OpenAPI contracts](contracts/openapi/README.md) describe the HTTP APIs,
 workflow-node inputs and outcomes, callbacks, and postal-station operations. Start with
-[`contracts/openapi/v1/openapi.json`](contracts/openapi/v1/openapi.json).
+[`contracts/openapi/v1/openapi.yaml`](contracts/openapi/v1/openapi.yaml)
+or the equivalent [JSON](contracts/openapi/v1/openapi.json).
 
 ## How It Works
 

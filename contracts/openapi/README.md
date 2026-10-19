@@ -1,14 +1,18 @@
 # Xarta OpenAPI contracts
 
-[v1/openapi.json](v1/openapi.json) is the OpenAPI **3.1.0** contract for Xarta's
-HTTP APIs and the workflow capabilities accepted through intake. Open it in an
-OpenAPI 3.1-compatible viewer or client generator. JSON is used so repository checks
-can read it without adding a YAML dependency.
+[v1/openapi.yaml](v1/openapi.yaml) and [v1/openapi.json](v1/openapi.json) provide the
+same OpenAPI **3.1.0** contract for Xarta's HTTP APIs and the workflow capabilities
+accepted through intake. Import either file into an OpenAPI 3.1-compatible Swagger
+Editor, viewer or client generator. An editor limited to OpenAPI 3.0 will not support
+this contract simply by switching formats: its recursive schemas use JSON Schema
+2020-12 features. JSON is the editable source; YAML is generated and checked for drift.
 
 ## Layout and scope
 
 - `v1/openapi.json`: one self-contained contract, grouped by service tags, with
   reusable request, response, and recursive workflow schemas.
+- `v1/openapi.yaml`: generated equivalent for YAML-oriented editors and tooling;
+  do not edit independently.
 - `v1/CHANGELOG.md`: contract revisions and compatibility notes.
 - `../../tools/openapi_contract.py`: schema refresh and offline consistency check
   (run from the repository root as shown below).
@@ -149,6 +153,11 @@ incremental `00001.archive-metadata-search` Sqitch change before enabling traffi
    and parameter examples. Populate open-ended maps with realistic business data;
    include significant alternatives and error states. Reuse `components.examples`
    for shared payloads. Review descriptions, IDs and status semantics together.
+   After editing, regenerate the YAML copy:
+
+   ```console
+   uv run --frozen python tools/openapi_contract.py --export-yaml
+   ```
 3. `Workflow_*`, `RenderRequest`, `PreviewRequest`, and `DocumentTypeCheckRequest`
    schemas reuse executable protocol definitions.
    After changing those definitions, run:
@@ -159,7 +168,8 @@ incremental `00001.archive-metadata-search` Sqitch change before enabling traffi
 
    Curated schema examples survive a refresh. Review the generated diff and update
    examples for changed validation rules; refreshing does not update HTTP semantics.
-   Deployment-specific profile input contracts remain discoverable through intake.
+   This also regenerates YAML. Deployment-specific profile input contracts remain
+   discoverable through intake.
 4. Update `info.version` and `v1/CHANGELOG.md`: patch for documentation corrections,
    minor for compatible additions, major for breaking contract changes. During the
    pre-release phase, replace obsolete behavior in `v1` directly and explicitly
@@ -170,7 +180,8 @@ incremental `00001.archive-metadata-search` Sqitch change before enabling traffi
    resolution, schema validity, operation IDs, route coverage including aliases,
    equality with executable capability/render schemas, example coverage, schema
    conformance (including formats and JSON-encoded manifests), and absence of
-   generated `additionalPropN` keys in example payloads. Example annotation edits
+   generated `additionalPropN` keys in example payloads, and exact synchronization
+   of the generated YAML. Example annotation edits
    do not weaken executable-schema drift detection. The check does not execute
    providers or prove business semantics; review parsers and serializers as well.
 
@@ -178,6 +189,7 @@ For independent OpenAPI structural validation, without adding a project dependen
 
 ```console
 uvx --from openapi-spec-validator openapi-spec-validator contracts/openapi/v1/openapi.json
+uvx --from openapi-spec-validator openapi-spec-validator contracts/openapi/v1/openapi.yaml
 ```
 
 Git history preserves contract revisions; do not copy the entire document into a

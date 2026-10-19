@@ -10,6 +10,8 @@ import re
 from copy import deepcopy
 from pathlib import Path
 
+import yaml
+
 from jsonschema import Draft202012Validator
 from jsonschema import FormatChecker
 from jsonschema import ValidationError
@@ -22,7 +24,19 @@ from xarta.protocol.document.request.schema import SCHEMA_DOCUMENT_RENDER_REQUES
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "contracts/openapi/v1/openapi.json"
+YAML_CONTRACT = CONTRACT.with_suffix(".yaml")
 METHODS = {"get", "post", "put", "delete", "patch", "head", "options"}
+
+
+class OpenAPIDumper(yaml.SafeDumper):
+    def represent_str(self, value):
+        # PyYAML uses YAML 1.1: it leaves strings such as "0208" unquoted,
+        # but Swagger's YAML 1.2 parser reads them as numbers and loses the zero.
+        style = "'" if re.match(r"^[+-]?(?:[0-9]|\.[0-9])", value) else None
+        return self.represent_scalar("tag:yaml.org,2002:str", value, style=style)
+
+
+OpenAPIDumper.add_representer(str, OpenAPIDumper.represent_str)
 
 
 def executable_schemas() -> dict:
@@ -275,6 +289,9 @@ def check(document: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--update-schemas", action="store_true")
+    parser.add_argument(
+        "--export-yaml", action="store_true", help="Refresh the generated YAML contract"
+    )
     arguments = parser.parse_args()
     document = json.loads(CONTRACT.read_text())
     if arguments.update_schemas:
@@ -289,6 +306,24 @@ def main() -> None:
                 del schemas[name]
         CONTRACT.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n")
     check(document)
+    yaml_contract = (
+        "# Generated from openapi.json by tools/openapi_contract.py --export-yaml.\n"
+        + yaml.dump(
+            document,
+            Dumper=OpenAPIDumper,
+            sort_keys=False,
+            allow_unicode=True,
+            width=100,
+        )
+    )
+    if arguments.export_yaml or arguments.update_schemas:
+        YAML_CONTRACT.write_text(yaml_contract, encoding="utf-8")
+    if (
+        not YAML_CONTRACT.exists()
+        or YAML_CONTRACT.read_text(encoding="utf-8") != yaml_contract
+    ):
+        raise ValueError("Stale YAML contract; run with --export-yaml")
+    print("YAML contract matches the JSON source")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,25 @@
 # HTTP API v1 contract revisions
 
+## 7.0.0 — 2026-10-19
+
+- Reject unknown top-level intake fields in the shared preparation path, including
+  JSON submissions, multipart flow files and preparation requests. This enforces
+  the existing closed request schemas. Breaking pre-release behavior change:
+  callers that relied on silently ignored fields must remove them. HTTP paths and
+  operation IDs remain unchanged.
+- Describe and constrain bundle filenames, including document filename uniqueness
+  and the existing empty-string behavior of the optional ZIP filename.
+- Require nonempty, unique postal handover task lists; document task eligibility,
+  nullable operator references and idempotent replay semantics.
+- Constrain Doccle profile strings to contain non-whitespace characters when
+  non-null. These bundle, postal and Doccle restrictions already exist at runtime.
+- Add named examples for validation failures and omitted/null optional values.
+- Publish an equivalent generated `openapi.yaml` for OpenAPI 3.1-compatible Swagger
+  Editors. JSON remains the editable source; `make contracts-check` rejects stale
+  YAML. No HTTP API downgrade or separate YAML-specific contract is introduced.
+- Use OpenAPI 3.1's default JSON Schema dialect rather than an explicit non-default
+  document dialect, avoiding Swagger Editor's unsupported-dialect warning.
+
 ## 6.0.0 — 2026-10-17
 
 - Remove automatic historical-content cleanup. Only the logical document can be

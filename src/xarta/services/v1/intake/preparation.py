@@ -86,6 +86,19 @@ def prepare_intake(
     if not isinstance(flow_definition, dict):
         raise IntakeValidationError("A JSON flow definition is required.")
 
+    unknown = flow_definition.keys() - {
+        "id",
+        "correlation_id",
+        "files",
+        "dag",
+        "delivery_profile",
+        "delivery_values",
+    }
+    if unknown:
+        raise IntakeValidationError(
+            f"Unsupported flow submission fields: {', '.join(sorted(unknown))}"
+        )
+
     flow_definition = copy.deepcopy(flow_definition)
 
     for field in ("id", "correlation_id"):
