@@ -11,7 +11,7 @@ DEV_CERTIFICATE_DIR ?= .dev/runtime/certificates
 SHELL := /bin/bash
 .PHONY: help install lock format format-check lint typecheck test security profiles-check contracts-check verify \
 	docker-build docker-validate helm-verify setup dev mcp services-check credentials-check certificates \
-	db-create-archive db-deploy streams wallets archive-test telemetry-check scenario-bundle scenario-archive-representations scenario-generate-sign-archive \
+	db-create-archive db-deploy streams wallets archive-test archive-load-test telemetry-check scenario-bundle scenario-archive-representations scenario-generate-sign-archive \
 	scenario-signature-xarta-dev-seal-v1 scenario-signature-pades-b-b-v1 scenario-signature-pades-b-t-v1 scenario-preview \
 	scenario-search scenario-search-standalone scenario-search-burst scenario-search-burst-standalone scenario-wait-for scenario-flow-profile scenario-postal-local scenario-postal-local-printer scenario-x402-facilitator scenario-x402-paid-intake scenario-x402-base-sepolia scenario-all standalone debug station station-cups \
 	station-mock job-expire-documents job-cleanup-generate job-cleanup-bundle job-replay-dead-letters
@@ -221,6 +221,9 @@ archive-test: ## Run focused archive behavior tests
 		tests/jobs/test_expire_archived_documents.py \
 		tests/nats/test_lifecycle.py \
 		tests/tracking/test_tracked_capabilities.py
+
+archive-load-test: ## Load-test archive insertion (needs ARCHIVE_POSTGRES_TEST_DSN and Sqitch)
+	SQITCH="$(SQITCH)" $(UV) run --frozen python tools/archive_load_test.py $(ARCHIVE_LOAD_TEST_ARGS)
 
 scenario-bundle: services-check certificates db-deploy streams ## Verify and measure the local archive/bundle flow
 	$(UV) run --frozen python tests/scenarios/bundle.py

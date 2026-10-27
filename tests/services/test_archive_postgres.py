@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime
 import hashlib
 import os
@@ -20,6 +21,7 @@ import orjson
 import pytest
 import pytest_asyncio
 
+from xarta.services.v1.archive.db import ArchiveConflictError
 from xarta.services.v1.archive.db import ArchivePostgresModel
 from xarta.services.v1.archive.db import RepresentationWrite
 from xarta.services.v1.archive.db import VersionWrite
@@ -540,3 +542,169 @@ async def test_all_versions_retained_until_logical_document_deletion(
     )
     assert await pool.fetchval("SELECT count(*) FROM archive_idempotency") == 0
     assert await ArchivePostgresModel.pending_deletion_commands(limit=100) == []
+
+
+def invoice_write(
+    document_id, version_id, representation_id, *, number, key, parent=None
+) -> VersionWrite:
+    """One attempt of an invoice snapshot request; storage keys are attempt-private."""
+    content = f"invoice revision {number}".encode()
+    return VersionWrite(
+        archive="invoices",
+        document_id=document_id,
+        version_id=version_id,
+        parent_version_id=parent,
+        idempotency_key=key,
+        fingerprint=hashlib.sha512(f"request {number}".encode()).digest(),
+        snapshot_fingerprint=hashlib.sha512(content).digest(),
+        created=datetime.datetime(2030, 1, number, tzinfo=datetime.UTC),
+        expires=None,
+        document_type="invoice",
+        metadata={"revision": number},
+        default_representation_id=representation_id,
+        representations=(
+            RepresentationWrite(
+                representation_id=representation_id,
+                name="invoice.txt",
+                content_type="text/plain",
+                metadata={},
+                backend="test",
+                backend_revision="v1",
+                storage_key=f"{document_id}/{version_id}/{representation_id}.{uuid4().hex}",
+                checksum=hashlib.sha512(content).digest(),
+                size=len(content),
+            ),
+        ),
+    )
+
+
+@pytest_asyncio.fixture
+async def archive(database, monkeypatch, tmp_path):
+    """A migrated archive database with filesystem storage and no NATS."""
+    pool, migrate = database
+    await migrate("deploy", "--verify")
+    monkeypatch.setattr(
+        ArchivePostgresModel, "_jetstream", staticmethod(lambda: AsyncMock())
+    )
+    backend = FilesystemStorageBackend(str(tmp_path))
+
+    async def persist(representation):
+        return await backend.put(
+            representation.storage_key, b"content", representation.content_type
+        )
+
+    async def rollback(representation):
+        await backend.delete(representation.storage_key)
+
+    return pool, backend, persist, rollback
+
+
+async def test_concurrent_attempt_of_same_request_returns_committed_result(archive):
+    pool, backend, persist, rollback = archive
+    document_id, version_id, representation_id = uuid4(), uuid4(), uuid4()
+    first = invoice_write(
+        document_id, version_id, representation_id, number=1, key="invoice-0042"
+    )
+    second = invoice_write(
+        document_id, version_id, representation_id, number=1, key="invoice-0042"
+    )
+    uploaded, resume = asyncio.Event(), asyncio.Event()
+
+    async def persist_then_wait(representation):
+        created = await persist(representation)
+        uploaded.set()
+        await resume.wait()
+        return created
+
+    # The first attempt uploads and then stalls before its commit transaction, while
+    # the second attempt of the same request runs to completion.
+    stalled = asyncio.create_task(
+        ArchivePostgresModel.prepare_version(
+            first, ArchivePolicy(), persist_then_wait, rollback
+        )
+    )
+    await asyncio.wait_for(uploaded.wait(), timeout=5)
+    committed = await ArchivePostgresModel.prepare_version(
+        second, ArchivePolicy(), persist, rollback
+    )
+    resume.set()
+    late = await asyncio.wait_for(stalled, timeout=5)
+
+    assert committed.outcome == "created" and not committed.replayed
+    # Under the lock, the late attempt finds the committed retry record instead of
+    # reporting a conflict with the HEAD its own request created.
+    assert late.replayed
+    assert late.dict() == committed.dict()
+    assert await pool.fetchval("SELECT count(*) FROM archive_document_versions") == 1
+    assert await backend.get(second.representations[0].storage_key) == b"content"
+    with pytest.raises(FileNotFoundError):
+        await backend.get(first.representations[0].storage_key)
+
+
+@pytest.mark.parametrize("existing_document", [False, True])
+async def test_upload_holds_no_database_connection(archive, existing_document):
+    pool, _backend, persist, rollback = archive
+    document_id, parent = uuid4(), None
+    if existing_document:
+        parent = uuid4()
+        await ArchivePostgresModel.prepare_version(
+            invoice_write(document_id, parent, uuid4(), number=1, key="invoice-1"),
+            ArchivePolicy(),
+            persist,
+            rollback,
+        )
+    candidate = invoice_write(
+        document_id, uuid4(), uuid4(), number=2, key="invoice-2", parent=parent
+    )
+
+    async def persist_with_every_connection(representation):
+        # The pool holds 3 connections; this only succeeds if the write holds none.
+        async with (
+            asyncio.timeout(5),
+            pool.acquire(),
+            pool.acquire(),
+            pool.acquire(),
+        ):
+            return await persist(representation)
+
+    result = await ArchivePostgresModel.prepare_version(
+        candidate, ArchivePolicy(), persist_with_every_connection, rollback
+    )
+    assert result.outcome == ("version_created" if existing_document else "created")
+
+
+async def test_idempotency_key_takes_precedence_over_version_identity(archive):
+    _pool, _backend, persist, rollback = archive
+    document_id, first_version, second_version = uuid4(), uuid4(), uuid4()
+    await ArchivePostgresModel.prepare_version(
+        invoice_write(document_id, first_version, uuid4(), number=1, key="invoice-1"),
+        ArchivePolicy(),
+        persist,
+        rollback,
+    )
+    second = invoice_write(
+        document_id,
+        second_version,
+        uuid4(),
+        number=2,
+        key="invoice-2",
+        parent=first_version,
+    )
+    await ArchivePostgresModel.prepare_version(
+        second, ArchivePolicy(), persist, rollback
+    )
+
+    # The same request under a new key is recognised by its version identity.
+    under_new_key = dataclasses.replace(second, idempotency_key="invoice-2-retry")
+    replay = await ArchivePostgresModel.prepare_version(
+        under_new_key, ArchivePolicy(), AsyncMock(), rollback
+    )
+    assert replay.replayed and replay.version_id == second_version
+
+    # A key that already belongs to another request wins over a version identity
+    # that would match: reusing "invoice-1" for this request is a conflict.
+    reused_key = dataclasses.replace(second, idempotency_key="invoice-1")
+    with pytest.raises(ArchiveConflictError, match="changed semantics"):
+        await ArchivePostgresModel.prepare_version(
+            reused_key, ArchivePolicy(), AsyncMock(), rollback
+        )

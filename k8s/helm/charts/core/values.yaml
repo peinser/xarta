@@ -160,6 +160,12 @@ database:
   # Archive always uses a separate database, which may be hosted by the same server.
   archivePostgresql:
     database: xarta_archive
+    # Connections per archive process (code default: 5). Uploads hold no
+    # connection, but downloads, details, search, deletion cleanup and workflow
+    # writes share this pool. Connections open on demand up to this bound.
+    # Budget PostgreSQL max_connections for replicas x maxPoolSize, plus the
+    # expiration CronJob, which uses the same setting, and Sqitch migrations.
+    maxPoolSize: 20
 ## Cache settings.
 ##
 cache:

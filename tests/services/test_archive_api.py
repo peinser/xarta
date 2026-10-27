@@ -199,6 +199,31 @@ async def test_manifest_parses_separate_version_and_representation_metadata() ->
 
 
 @pytest.mark.asyncio
+async def test_unknown_document_type_is_a_bad_request() -> None:
+    request = snapshot_request(
+        {
+            "document_type": "unregistered-type",
+            "representations": {
+                "items": [{"field": "pdf", "content": {"type": "application/pdf"}}]
+            },
+        },
+        {"pdf": b"pdf"},
+    )
+    with (
+        patch(
+            "xarta.services.v1.archive.store.fetch_document_type",
+            AsyncMock(return_value=None),
+        ),
+        pytest.raises(BadRequestError, match="Unknown document type") as raised,
+    ):
+        await _parse_snapshot(request, "default")
+
+    response = await archive_exception(SimpleNamespace(), raised.value)
+    assert response.status == 400
+    assert orjson.loads(response.body)["error"]["code"] == "bad_request"
+
+
+@pytest.mark.asyncio
 async def test_manifest_requires_explicit_default_for_multiple_representations() -> (
     None
 ):

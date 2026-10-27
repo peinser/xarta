@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import hashlib
 import os
+import stat
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -66,25 +67,44 @@ class Connection:
         self.lifecycle = lifecycle
         self.commit_error = commit_error
         self.executed: list[tuple[str, tuple]] = []
+        self.read: list[str] = []
         self.insert_error: BaseException | None = None
         self.jetstream = AsyncMock()
 
     def transaction(self):
-        return AsyncContext(error=self.commit_error)
+        # Only the transaction that inserted a version can fail ambiguously; the
+        # earlier decision transaction commits nothing that references storage.
+        connection = self
+
+        class Transaction(AsyncContext):
+            async def __aexit__(self, *_args):
+                inserted = any(
+                    "INSERT INTO archive_document_versions" in query
+                    for query, _ in connection.executed
+                )
+                if connection.commit_error and inserted:
+                    raise connection.commit_error
+
+        return Transaction()
 
     async def fetchrow(self, query, *_args):
+        self.read.append(query)
+        head = {
+            "_id": 1,
+            "head_version_id": 10 if self.head_id else None,
+            "head_public_version_id": self.head_id,
+            "snapshot_fingerprint": self.snapshot_fingerprint,
+            "lifecycle": self.lifecycle,
+        }
+        if "AS anchor" in query:
+            # The unlocked read of HEAD and stored retry results, with no retry.
+            return {**head, "response": None}
+        if "FOR UPDATE OF aggregate" in query:
+            return head
         if "archive_idempotency" in query:
             return None
         if "SELECT _id FROM archive_documents" in query:
             return {"_id": 1}
-        if "FOR UPDATE OF aggregate" in query:
-            return {
-                "_id": 1,
-                "head_version_id": 10 if self.head_id else None,
-                "head_public_version_id": self.head_id,
-                "snapshot_fingerprint": self.snapshot_fingerprint,
-                "lifecycle": self.lifecycle,
-            }
         if "jsonb_agg" in query:
             return {
                 "default_representation_id": self.default_representation_id,
@@ -198,6 +218,29 @@ async def test_complete_snapshot_persists_every_representation_before_sealing(
         next(query for query in queries if "SET sealed = true" in query)
     ) < queries.index(
         next(query for query in queries if "SET head_version_id" in query)
+    )
+
+
+@pytest.mark.asyncio
+async def test_new_version_locks_existing_document_once(monkeypatch) -> None:
+    head_id = uuid4()
+    connection = Connection(head_id=head_id, snapshot_fingerprint=b"h" * 64)
+    install(monkeypatch, connection)
+
+    result = await ArchivePostgresModel.prepare_version(
+        write(parent=head_id),
+        ArchivePolicy(),
+        AsyncMock(return_value=True),
+        AsyncMock(),
+    )
+
+    assert result.outcome == "version_created"
+    # The decision before the upload is an unlocked read; only the commit locks.
+    assert "FOR UPDATE" not in connection.read[0]
+    assert sum("FOR UPDATE" in query for query in connection.read) == 1
+    # The unlocked read found the document row, so it is not inserted again.
+    assert not any(
+        "INSERT INTO archive_documents" in query for query, _ in connection.executed
     )
 
 
@@ -345,6 +388,7 @@ async def test_failed_write_cleanup_cannot_delete_committed_retry(
     async def fetch_recorded_result(query, *args):
         if "FROM archive_idempotency" in query:
             return {
+                "_id": None,
                 "request_fingerprint": second.fingerprint,
                 "response": recorded,
                 "parent_version_id": None,
@@ -584,6 +628,37 @@ async def test_filesystem_backend_never_overwrites(tmp_path) -> None:
             await backend.delete(key)
             await backend.delete(key)
             assert not (tmp_path / key).exists()
+
+
+@pytest.mark.asyncio
+async def test_filesystem_write_is_durable_before_it_returns(
+    tmp_path, monkeypatch
+) -> None:
+    events = []
+    fsync, link = os.fsync, os.link
+
+    def recording_fsync(descriptor):
+        is_directory = stat.S_ISDIR(os.fstat(descriptor).st_mode)
+        events.append("sync directory" if is_directory else "sync file")
+        fsync(descriptor)
+
+    def recording_link(source, destination):
+        events.append("link")
+        link(source, destination)
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+    monkeypatch.setattr(os, "link", recording_link)
+    backend = FilesystemStorageBackend(os.fspath(tmp_path))
+
+    assert await backend.put("invoices/new/directory/key", b"pdf", "application/pdf")
+
+    # Each new directory is synced into its parent, then the bytes before they are
+    # published under the key, then the directory entry that publishes them.
+    assert events == ["sync directory"] * 3 + ["sync file", "link", "sync directory"]
+    assert (tmp_path / "invoices/new/directory/key").read_bytes() == b"pdf"
+    assert [path.name for path in (tmp_path / "invoices/new/directory").iterdir()] == [
+        "key"
+    ]
 
 
 def test_archive_schema_is_representation_aware_and_immutable() -> None:

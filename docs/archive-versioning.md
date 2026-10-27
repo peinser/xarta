@@ -187,8 +187,12 @@ while their representations exist.
 
 Aggregate row locking serializes `HEAD` advancement. Exact idempotency replay returns the
 recorded write result in the current response format; reuse of an idempotency key or requested version with different semantics
-returns `version_conflict`. Representation objects are written conditionally before SQL
-commit. Every parsed snapshot allocates a fresh UUIDv4 suffix on its physical
+returns `version_conflict`. A write first settles replays and conflicts with one unlocked
+read, and records an unchanged snapshot in a short locked transaction, without touching
+storage. Otherwise it uploads with no database connection or lock held, then re-validates
+and commits the version in a short locked transaction, deleting its uploads if the result
+no longer needs them.
+Representation objects are written conditionally before SQL commit. Every parsed snapshot allocates a fresh UUIDv4 suffix on its physical
 representation keys, using the same backend prefix/CRC32 shard policy. Logical
 identities and semantic fingerprints stay deterministic. SQL failure can compensate
 after releasing its lock without deleting a concurrent retry's independent objects.

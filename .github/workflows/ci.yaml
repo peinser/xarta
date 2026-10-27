@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: postgres:18
         env:
           POSTGRES_USER: dev
           POSTGRES_PASSWORD: dev
@@ -44,7 +44,7 @@ jobs:
           version: "0.8.17"
           enable-cache: true
       - name: Install Python
-        run: uv python install 3.13
+        run: uv python install 3.14
       - name: Install dependencies
         run: uv sync --frozen --all-groups
       - name: Install Sqitch for archive upgrade integration tests
@@ -111,6 +111,10 @@ jobs:
         run: psql -h localhost -U dev -d dev -v ON_ERROR_STOP=1 -f db/verify/00021.direct-successor-routing.sql
       - name: Verify
         run: make verify
+      # Reports insertion latency in the job summary. Fails on incorrect stored
+      # state; latency is not gated because shared runners are noisy.
+      - name: Archive insertion load test
+        run: make archive-load-test
 
   helm:
     name: Helm

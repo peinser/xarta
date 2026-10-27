@@ -14,6 +14,7 @@ import orjson
 from xarta.concurrency import bounded_map
 from xarta.db.postgresql import SanicPostgresModel
 from xarta.exceptions.protocol import ArchiveDocumentNotFound
+from xarta.logging import logger
 from xarta.protocol.document import ArchiveDocumentVersion
 from xarta.protocol.document import ArchiveRepresentation
 from xarta.protocol.document.type import DocumentTypeIdentifier
@@ -236,36 +237,74 @@ class ArchivePostgresModel(SanicPostgresModel):
         for command in commands:
             await publish_deletion_command(jetstream, command)
 
+    # The document's aggregate row and HEAD. Parameters: $1 archive, $2 document_id.
+    _HEAD_QUERY = (
+        "SELECT aggregate._id, aggregate.head_version_id, aggregate.lifecycle, "
+        "head.version_id AS head_public_version_id, head.snapshot_fingerprint "
+        "FROM archive_documents aggregate LEFT JOIN archive_document_versions head "
+        "ON head._id = aggregate.head_version_id "
+        "WHERE aggregate.archive = $1 AND aggregate.document_id = $2"
+    )
+
+    # The stored result of an earlier attempt of this request. A record for the same
+    # Idempotency-Key takes precedence over one for the same requested version
+    # identity; each branch uses its own unique index. Parameters: $1 archive,
+    # $2 document_id, $3 idempotency key, $4 requested version_id.
+    _REPLAY_QUERY = (
+        "WITH candidate AS ("
+        "SELECT replay._id, 0 AS precedence FROM archive_idempotency replay "
+        "WHERE replay.archive = $1 AND replay.idempotency_key = $3 "
+        "UNION ALL "
+        "SELECT replay._id, 1 FROM archive_idempotency replay "
+        "JOIN archive_documents aggregate ON aggregate._id = replay.aggregate_id "
+        "WHERE aggregate.archive = $1 AND aggregate.document_id = $2 "
+        "AND replay.requested_version_id = $4) "
+        "SELECT replay.request_fingerprint, replay.response, parent.version_id AS parent_version_id "
+        "FROM candidate JOIN archive_idempotency replay ON replay._id = candidate._id "
+        "JOIN archive_documents aggregate ON aggregate._id = replay.aggregate_id "
+        "JOIN archive_document_versions version ON version.aggregate_id = aggregate._id "
+        "AND version.version_id = (replay.response->>'version_id')::uuid "
+        "LEFT JOIN archive_document_versions parent ON parent._id = version.parent_version_id "
+        "WHERE aggregate.lifecycle = 'active' ORDER BY candidate.precedence LIMIT 1"
+    )
+
     @classmethod
     async def _replay(
         cls, connection: Connection, write: VersionWrite
     ) -> VersionResult | None:
         row = await connection.fetchrow(
-            "SELECT replay.request_fingerprint, replay.response, parent.version_id AS parent_version_id "
-            "FROM archive_idempotency replay JOIN archive_documents aggregate "
-            "ON aggregate._id = replay.aggregate_id "
-            "JOIN archive_document_versions version ON version.aggregate_id = aggregate._id "
-            "AND version.version_id = (replay.response->>'version_id')::uuid "
-            "LEFT JOIN archive_document_versions parent ON parent._id = version.parent_version_id "
-            "WHERE replay.archive = $1 AND replay.idempotency_key = $2 "
-            "AND aggregate.lifecycle = 'active'",
+            cls._REPLAY_QUERY,
             write.archive,
+            write.document_id,
             write.idempotency_key,
+            write.version_id,
         )
-        if row is None:
-            row = await connection.fetchrow(
-                "SELECT replay.request_fingerprint, replay.response, parent.version_id AS parent_version_id "
-                "FROM archive_idempotency replay JOIN archive_documents aggregate "
-                "ON aggregate._id = replay.aggregate_id "
-                "JOIN archive_document_versions version ON version.aggregate_id = aggregate._id "
-                "AND version.version_id = (replay.response->>'version_id')::uuid "
-                "LEFT JOIN archive_document_versions parent ON parent._id = version.parent_version_id "
-                "WHERE aggregate.archive = $1 AND aggregate.document_id = $2 "
-                "AND replay.requested_version_id = $3 AND aggregate.lifecycle = 'active'",
-                write.archive,
-                write.document_id,
-                write.version_id,
-            )
+        return cls._replay_result(row, write)
+
+    @classmethod
+    async def _head_and_replay(cls, connection: Connection, write: VersionWrite):
+        """Read HEAD and any stored retry result in one query, without locking.
+
+        One statement reads both from the same snapshot, so a concurrent commit of
+        this same request is either visible in both or in neither. It is never
+        reported as a conflict with the HEAD it just created.
+        Returns the aggregate row (None for a new document) and the stored result.
+        """
+        row = await connection.fetchrow(
+            f"WITH head AS ({cls._HEAD_QUERY}), replay AS ({cls._REPLAY_QUERY}) "
+            "SELECT head.*, replay.* FROM (VALUES (true)) AS anchor (present) "
+            "LEFT JOIN head ON true LEFT JOIN replay ON true",
+            write.archive,
+            write.document_id,
+            write.idempotency_key,
+            write.version_id,
+        )
+        aggregate = row if row["_id"] is not None else None
+        replay = row if row["response"] is not None else None
+        return aggregate, cls._replay_result(replay, write)
+
+    @classmethod
+    def _replay_result(cls, row, write: VersionWrite) -> VersionResult | None:
         if row is None:
             return None
         if bytes(row["request_fingerprint"]) != write.fingerprint:
@@ -311,8 +350,16 @@ class ArchivePostgresModel(SanicPostgresModel):
         representations: list[RepresentationWrite],
         rollback: Callable[[RepresentationWrite], Awaitable[None]],
     ) -> None:
+        # A failed delete leaves an unreferenced orphan object. That must not
+        # replace the request's result or hide the error that caused cleanup.
         for representation in reversed(representations):
-            await rollback(representation)
+            try:
+                await rollback(representation)
+            except Exception:
+                await logger.aexception(
+                    "Archive representation cleanup failed",
+                    storage_key=representation.storage_key,
+                )
 
     @classmethod
     async def prepare_version(
@@ -323,44 +370,80 @@ class ArchivePostgresModel(SanicPostgresModel):
         rollback: Callable[[RepresentationWrite], Awaitable[None]],
         representation_concurrency: int = 1,
     ) -> VersionResult:
-        """Store a snapshot with physical allocation keys private to this attempt.
+        """Store a snapshot without holding a database connection during uploads.
 
-        Independent attempts must not reuse those keys: compensation can run after
-        the transaction has released its lock. Logical identities may be reused.
+        An unlocked read first settles exact retries and conflicts; its answers are
+        correct as of that read. An unchanged snapshot is recorded in a short locked
+        transaction without touching storage. Otherwise the representations are
+        uploaded with no connection or lock held, and a short locked transaction
+        re-validates against HEAD before committing.
         """
-        created_storage: list[RepresentationWrite] = []
-        transaction_ready = False
-
-        async def tracked_persist() -> None:
-            await cls._persist_representations(
-                write.representations,
+        decided = None
+        async with cls.pool().acquire() as connection:
+            aggregate, replay = await cls._head_and_replay(connection, write)
+            if replay:
+                decided = replay, await cls._replay_event(connection, write, replay)
+            elif cls._check_head(aggregate, write, policy):
+                async with connection.transaction():
+                    decided = await cls._prepare_locked(
+                        connection, write, policy, storage_ready=False
+                    )
+        if decided is None:
+            decided = await cls._store_version(
+                write,
+                policy,
                 persist,
-                created_storage,
+                rollback,
                 representation_concurrency,
+                # Aggregate rows are never deleted; deletion leaves a tombstone.
+                document_exists=aggregate is not None,
             )
-
-        try:
-            async with cls.pool().acquire() as connection, connection.transaction():
-                result, event = await cls._prepare_locked(
-                    connection, write, policy, tracked_persist
-                )
-                transaction_ready = True
-        except asyncio.CancelledError:
-            if created_storage and not transaction_ready:
-                await asyncio.shield(
-                    cls._rollback_representations(created_storage, rollback)
-                )
-            raise
-        except Exception:
-            # Once the transaction body completed, a commit error is ambiguous:
-            # PostgreSQL may reference every created object, so deleting any is unsafe.
-            if created_storage and not transaction_ready:
-                await cls._rollback_representations(created_storage, rollback)
-            raise
-
+        result, event = decided
         if event is not None:
             await publish_archive_event(cls._jetstream(), **event)
         return result
+
+    @classmethod
+    async def _store_version(
+        cls,
+        write: VersionWrite,
+        policy: ArchivePolicy,
+        persist: Callable[[RepresentationWrite], Awaitable[bool]],
+        rollback: Callable[[RepresentationWrite], Awaitable[None]],
+        representation_concurrency: int,
+        *,
+        document_exists: bool,
+    ) -> tuple[VersionResult, dict[str, Any] | None]:
+        """Upload the representations, then commit the version if it is still valid.
+
+        Upload keys are private to this attempt (independent attempts must not reuse
+        them), so objects the transaction does not reference can be deleted after it
+        has released its lock without affecting a concurrent retry.
+        """
+        uploaded: list[RepresentationWrite] = []
+        referenced = False
+        try:
+            await cls._persist_representations(
+                write.representations, persist, uploaded, representation_concurrency
+            )
+            async with cls.pool().acquire() as connection, connection.transaction():
+                decided = await cls._prepare_locked(
+                    connection,
+                    write,
+                    policy,
+                    storage_ready=True,
+                    document_exists=document_exists,
+                )
+                assert decided is not None
+                # Once the body has inserted the version, a commit error is
+                # ambiguous: PostgreSQL may reference every upload, so keep them.
+                # Replays and unchanged results never reference this attempt's uploads.
+                result = decided[0]
+                referenced = not result.replayed and result.outcome != "unchanged"
+        finally:
+            if uploaded and not referenced:
+                await asyncio.shield(cls._rollback_representations(uploaded, rollback))
+        return decided
 
     @staticmethod
     def _write_event(
@@ -433,46 +516,73 @@ class ArchivePostgresModel(SanicPostgresModel):
         connection: Connection,
         write: VersionWrite,
         policy: ArchivePolicy,
-        persist: Callable[[], Awaitable[None]],
-    ) -> tuple[VersionResult, dict[str, Any] | None]:
-        replay = await cls._replay(connection, write)
-        if replay:
-            return replay, await cls._replay_event(connection, write, replay)
+        *,
+        storage_ready: bool,
+        document_exists: bool = True,
+    ) -> tuple[VersionResult, dict[str, Any] | None] | None:
+        """Decide a write under the document lock and record its result.
 
-        await connection.execute(
-            "INSERT INTO archive_documents (archive, document_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-            write.archive,
-            write.document_id,
-        )
+        Returns None when a new version is needed but its representations have not
+        been uploaded yet (storage_ready is false). Nothing is written in that case;
+        the caller uploads and calls again, and this decision is then re-validated.
+        """
+        if storage_ready and not document_exists:
+            # Create the aggregate row so that a new document can be locked.
+            await connection.execute(
+                "INSERT INTO archive_documents (archive, document_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                write.archive,
+                write.document_id,
+            )
+        # Lock first, then read the retry records with a snapshot taken after the
+        # lock: a writer this transaction waited for has committed its record by then.
         aggregate = await connection.fetchrow(
-            "SELECT aggregate._id, aggregate.head_version_id, aggregate.lifecycle, "
-            "head.version_id AS head_public_version_id, head.snapshot_fingerprint "
-            "FROM archive_documents aggregate LEFT JOIN archive_document_versions head "
-            "ON head._id = aggregate.head_version_id "
-            "WHERE aggregate.archive = $1 AND aggregate.document_id = $2 FOR UPDATE OF aggregate",
+            cls._HEAD_QUERY + " FOR UPDATE OF aggregate",
             write.archive,
             write.document_id,
         )
         replay = await cls._replay(connection, write)
         if replay:
             return replay, await cls._replay_event(connection, write, replay)
-        if aggregate["lifecycle"] != "active":
-            outcome = (
-                "document_deleted"
-                if aggregate["lifecycle"] == "deleted"
-                else "deletion_in_progress"
-            )
+        if not cls._check_head(aggregate, write, policy):
+            if not storage_ready:
+                return None
+            # Inserting the aggregate above guarantees the locked row exists.
+            assert aggregate is not None
+            return await cls._insert_version(connection, write, aggregate)
+
+        details = await cls._version_result(
+            connection, aggregate["_id"], aggregate["head_public_version_id"]
+        )
+        result = VersionResult(
+            write.archive,
+            write.document_id,
+            aggregate["head_public_version_id"],
+            details.parent_version_id,
+            "unchanged",
+            details.default_representation_id,
+            details.representations,
+        )
+        await cls._record_replay(connection, aggregate["_id"], write, result)
+        return result, None
+
+    @staticmethod
+    def _check_head(aggregate, write: VersionWrite, policy: ArchivePolicy) -> bool:
+        """Raise if the write may not follow HEAD; return whether it repeats HEAD.
+
+        `aggregate` is a row of `_HEAD_QUERY`, or None for a new document.
+        """
+        if aggregate is not None and aggregate["lifecycle"] != "active":
+            if aggregate["lifecycle"] == "deleted":
+                raise ArchiveConflictError(
+                    "document_deleted", "Archive document identity is deleted"
+                )
             raise ArchiveConflictError(
-                outcome,
-                (
-                    "Archive document identity is deleted"
-                    if outcome == "document_deleted"
-                    else "Archive document deletion is in progress"
-                ),
+                "deletion_in_progress", "Archive document deletion is in progress"
             )
 
-        head_internal_id = aggregate["head_version_id"]
-        head_public_id = aggregate["head_public_version_id"]
+        head_public_id = (
+            aggregate["head_public_version_id"] if aggregate is not None else None
+        )
         if (
             head_public_id is not None
             and policy.require_current_predecessor
@@ -490,27 +600,20 @@ class ArchivePostgresModel(SanicPostgresModel):
             and bytes(aggregate["snapshot_fingerprint"]) == write.snapshot_fingerprint
             and policy.duplicate_unchanged
         ):
-            details = await cls._version_result(
-                connection, aggregate["_id"], head_public_id
-            )
-            result = VersionResult(
-                write.archive,
-                write.document_id,
-                head_public_id,
-                details.parent_version_id,
-                "unchanged",
-                details.default_representation_id,
-                details.representations,
-            )
-            await cls._record_replay(connection, aggregate["_id"], write, result)
-            return result, None
+            return True
 
         if head_public_id is not None and policy.write == "create-only":
             raise ArchiveConflictError(
                 "overwrite_rejected", "Archive policy only permits document creation"
             )
+        return False
 
-        await persist()
+    @classmethod
+    async def _insert_version(
+        cls, connection: Connection, write: VersionWrite, aggregate
+    ) -> tuple[VersionResult, dict[str, Any] | None]:
+        head_internal_id = aggregate["head_version_id"]
+        head_public_id = aggregate["head_public_version_id"]
         version_internal_id = await connection.fetchval(
             "INSERT INTO archive_document_versions (aggregate_id, version_id, parent_version_id, "
             "created, expires, document_type, metadata, default_representation_id, "

@@ -11,9 +11,6 @@ from typing import Any
 from typing import Protocol
 from zlib import crc32
 
-import aiofiles  # type: ignore[import-untyped]
-import aiofiles.os  # type: ignore[import-untyped]
-
 from xarta.protocol.document.archive import validate_archive_name
 from xarta.storage.s3 import S3ClientManager
 
@@ -61,6 +58,41 @@ def _make_durable_directories(directory: str) -> None:
         _fsync_directory(os.path.dirname(created))
 
 
+def _read(path: str) -> bytes:
+    with open(path, "rb") as stream:
+        return stream.read()
+
+
+def _write_durably(path: str, data: bytes) -> bool:
+    """Store immutable bytes at path and return whether this call created them.
+
+    The database commits a reference to the path after this returns, so the bytes
+    and the directory entries leading to them must be durable first.
+    """
+    directory = os.path.dirname(path)
+    _make_durable_directories(directory)
+    temporary = f"{path}.{uuid.uuid4()}.tmp"
+    try:
+        with open(temporary, "xb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(temporary, path)
+            created = True
+        except FileExistsError as ex:
+            if _read(path) != data:
+                raise FileExistsError(
+                    f"Immutable storage file already exists: {path}"
+                ) from ex
+            created = False
+        _fsync_directory(directory)
+        return created
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(temporary)
+
+
 class FilesystemStorageBackend:
     def __init__(self, root: str) -> None:
         self.root = os.path.abspath(root)
@@ -86,40 +118,17 @@ class FilesystemStorageBackend:
         return path
 
     async def put(self, key: str, data: bytes, content_type: str) -> bool:
-        # The database commits a reference to this key after put() returns, so
-        # the bytes and the directory entries leading to them must be durable.
         del content_type
-        path = self._path(key)
-        directory = os.path.dirname(path)
-        await asyncio.to_thread(_make_durable_directories, directory)
-        temporary = f"{path}.{uuid.uuid4()}.tmp"
-        try:
-            async with aiofiles.open(temporary, "xb") as stream:
-                await stream.write(data)
-                await stream.flush()
-                await asyncio.to_thread(os.fsync, stream.fileno())
-            try:
-                await asyncio.to_thread(os.link, temporary, path)
-                created = True
-            except FileExistsError as ex:
-                if await self.get(key) != data:
-                    raise FileExistsError(
-                        f"Immutable storage key already exists: {key}"
-                    ) from ex
-                created = False
-            await asyncio.to_thread(_fsync_directory, directory)
-            return created
-        finally:
-            with contextlib.suppress(FileNotFoundError):
-                await aiofiles.os.remove(temporary)
+        # One thread hop per file: each hop wakes a worker thread and the event
+        # loop, and per-step hops made those wake-ups the per-process bottleneck.
+        return await asyncio.to_thread(_write_durably, self._path(key), data)
 
     async def get(self, key: str) -> bytes:
-        async with aiofiles.open(self._path(key), "rb") as stream:
-            return bytes(await stream.read())
+        return await asyncio.to_thread(_read, self._path(key))
 
     async def delete(self, key: str) -> None:
         with contextlib.suppress(FileNotFoundError):
-            await aiofiles.os.remove(self._path(key))
+            await asyncio.to_thread(os.remove, self._path(key))
 
 
 class LegacyFilesystemStorageBackend(FilesystemStorageBackend):
@@ -139,7 +148,12 @@ class ArchiveStorageSessions:
     def s3(self, client_options: Mapping[str, Any]) -> S3ClientManager:
         key = tuple(sorted(client_options.items()))
         if key not in self._s3:
-            self._s3[key] = S3ClientManager(dict(client_options))
+            # Uploads hold no database connection, so concurrent requests can all be
+            # uploading at once (two objects each for a typical snapshot). With the
+            # client default of 10, uploads queue from about 16 concurrent writes.
+            self._s3[key] = S3ClientManager(
+                dict(client_options), max_pool_connections=64
+            )
         return self._s3[key]
 
     async def close(self) -> None:

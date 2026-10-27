@@ -106,6 +106,9 @@ ARCHIVE_STORAGE_CONFIG_PATH: Final[str | None] = env.extract(
     key="ARCHIVE_STORAGE_CONFIG_PATH",
 )
 
+# Production default for the archive service; other services keep the shared default.
+DEFAULT_MAX_POOL_SIZE: Final[int] = 20
+
 
 @dataclass(frozen=True)
 class ArchiveComponents:
@@ -149,11 +152,22 @@ def create_archive_components(
     return ArchiveComponents(destinations=destinations, adapters=adapters)
 
 
+async def _keep_session(_connection) -> None:
+    """Skip asyncpg's session reset query when a connection returns to the pool.
+
+    asyncpg still rolls back an open transaction itself. The reset query only undoes
+    session state (SET, LISTEN, advisory locks, open cursors), which archive queries
+    never create, and it would cost every request an extra round trip.
+    """
+
+
 @bp.listener("before_server_start")
 async def _setup_database(app: Sanic) -> None:
     from .db import ArchivePostgresModel as DB
 
-    await DB.register(app)
+    # Reads, deletion cleanup and the short write transactions share this pool;
+    # uploads hold no connection. ARCHIVE_POSTGRESQL_MAX_POOL_SIZE overrides it.
+    await DB.register(app, max_pool_size=DEFAULT_MAX_POOL_SIZE, reset=_keep_session)
 
 
 @bp.listener("before_server_start")

@@ -29,7 +29,7 @@ WHERE conname IN (
     'archive_document_versions_default_representation_fk'
 ) AND condeferrable;
 
-SELECT 1 / CASE WHEN count(*) = 8 THEN 1 ELSE 0 END
+SELECT 1 / CASE WHEN count(*) = 7 THEN 1 ELSE 0 END
 FROM pg_indexes
 WHERE schemaname = 'public' AND indexname IN (
     'archive_document_representations_storage_idx',
@@ -38,7 +38,6 @@ WHERE schemaname = 'public' AND indexname IN (
     'archive_document_versions_document_type_idx',
     'archive_documents_head_idx',
     'archive_documents_deleting_idx',
-    'archive_document_representations_available_version_idx',
     'archive_document_versions_pagination_idx'
 );
 

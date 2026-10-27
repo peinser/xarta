@@ -12,6 +12,8 @@ import xarta.env
 
 if TYPE_CHECKING:
     from asyncio import AbstractEventLoop
+    from collections.abc import Awaitable
+    from collections.abc import Callable
 
 
 class BasePostgresModel:
@@ -36,6 +38,7 @@ class BasePostgresModel:
         command_timeout: int = 60,
         min_pool_size: int = 1,
         max_pool_size: int = 5,
+        reset: Callable[[asyncpg.Connection], Awaitable[None]] | None = None,
     ) -> asyncpg.pool.Pool:
         r"""
         Method that allocates the database pool and the associated resources.
@@ -64,6 +67,7 @@ class BasePostgresModel:
             command_timeout=int(setting("COMMAND_TIMEOUT", command_timeout)),
             min_size=int(setting("MIN_POOL_SIZE", min_pool_size)),
             max_size=int(setting("MAX_POOL_SIZE", max_pool_size)),
+            reset=reset,
         )
 
         return pool

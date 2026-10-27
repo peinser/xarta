@@ -76,7 +76,7 @@ idempotency, checkpoints, and reconciliation. See
 ## Quick Start
 
 The supported development environment is the repository's
-[Dev Container](https://containers.dev/). It provides Python 3.13, `uv`, PostgreSQL,
+[Dev Container](https://containers.dev/). It provides Python 3.14, `uv`, PostgreSQL,
 NATS, Dragonfly, MinIO, OpenSearch, Sqitch, Helm, and the other tools used by the
 Makefile. You need Git, Docker, and an editor or CLI that supports Dev Containers.
 
@@ -136,8 +136,8 @@ MCP clients can then connect to the stateless Streamable HTTP endpoint at
 
 ## Development
 
-Xarta supports Python 3.11 through 3.13; local development and production images use
-Python 3.13. [`uv`](https://docs.astral.sh/uv/) manages dependencies, and the committed
+Xarta supports Python 3.11 through 3.14; local development and production images use
+Python 3.14. [`uv`](https://docs.astral.sh/uv/) manages dependencies, and the committed
 `uv.lock` is authoritative.
 
 ```console

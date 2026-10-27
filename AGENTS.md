@@ -2,7 +2,7 @@
 
 Asynchronous document workflow service. Clients submit a document flow as a DAG, or typed inputs for an exact flow-profile version; intake validates it and publishes a deterministic root task to NATS JetStream. Independently deployable capability workers execute the nodes by routing slip choreography: every task carries the remaining graph, and each worker publishes the successors for its outcome. PostgreSQL only tracks operations that stay pending after a worker returns.
 
-- **Services**: Python 3.13 + Sanic + nats-py, managed with `uv`. Database changes go through Sqitch in `db/`; deployment through the Helm charts in `k8s/helm/`.
+- **Services**: Python 3.14 + Sanic + nats-py, managed with `uv`. Database changes go through Sqitch in `db/`; deployment through the Helm charts in `k8s/helm/`.
 - **Workflow**: [CONTRIBUTING.md](CONTRIBUTING.md) defines the development environment, `make verify`, and the workflow execution rules workers must follow.
 
 Write this code for human maintainers, not for minimum line count.

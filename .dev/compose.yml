@@ -108,7 +108,7 @@ services:
 
   postgres:
     container_name: postgres
-    image: postgres:16
+    image: postgres:18
     ports:
     - 5432:5432
     environment:
@@ -119,7 +119,7 @@ services:
       test: pg_isready -U dev -h 127.0.0.1
       interval: 15s
     volumes:
-    - xarta_postgres:/var/lib/postgresql/data
+    - xarta_postgres_18:/var/lib/postgresql
     networks:
     - xarta
 
@@ -234,7 +234,7 @@ services:
     - xarta
 
 volumes:
-  xarta_postgres:
+  xarta_postgres_18:
   xarta_pgadmin:
   xarta_archive:
   xarta_tmp:

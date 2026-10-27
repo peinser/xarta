@@ -1,6 +1,6 @@
 # python-base #################################################################
 
-FROM python:3.13-slim AS python-base
+FROM python:3.14-slim AS python-base
 
 LABEL artifact=false
 
@@ -26,9 +26,9 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     build-essential && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.24 /uv /uvx /bin/
 
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock README.md LICENSE ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 

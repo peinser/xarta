@@ -1,6 +1,6 @@
 # python-base #################################################################
 
-FROM python:3.13-slim AS python-base
+FROM python:3.14-slim AS python-base
 
 LABEL artifact=false
 
@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     build-essential \
     curl
 
-COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.24 /uv /uvx /bin/
 
 WORKDIR ${PYSETUP_PATH}
 COPY . .

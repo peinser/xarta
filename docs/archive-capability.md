@@ -486,12 +486,46 @@ removes them and leaves a tombstone that prevents reuse of the document identity
 
 ### Storage failure boundary
 
+A write runs in three steps, so no database connection or document lock is held
+while bytes are uploaded, and a new version locks the document only once:
+
+1. One unlocked query reads `HEAD` and the replay records from the same snapshot
+   and settles exact replays and conflicts (deletion, predecessor, `create-only`).
+   These answers are correct as of the read, and a concurrent commit of the same
+   request is visible in both or neither, so it is found as a replay rather than
+   reported as a conflict with its own new `HEAD`. A snapshot that matches `HEAD`
+   is recorded as `unchanged` in a short locked transaction that repeats the
+   checks. None of these touch storage.
+2. Otherwise the representations are uploaded with no connection held.
+3. A short transaction locks the document and repeats every check, because another
+   writer may have changed `HEAD` in the meantime. If the version is still new, it
+   is inserted and committed. If the state changed, for example to a conflict or an
+   `unchanged` match, the result is recorded as usual and this attempt's uploads are
+   deleted.
+
+Under contention on one document, a losing writer can therefore upload content
+that is deleted again; independent documents are unaffected. Step 3 always makes
+the final decision for a new version.
+
+A new version costs 10 PostgreSQL round trips: the unlocked read, then 9 in the
+locked transaction including `BEGIN` and `COMMIT`. A new document costs 11, because
+its aggregate row must be created before it can be locked. An `unchanged`
+resubmission costs 7 and an exact replay 2. Inside the locked transaction, the
+replay records are read in a separate statement after the lock: a single statement
+would keep the snapshot taken before waiting for the lock, and miss a record
+committed by the writer it waited for. The archive pool skips asyncpg's
+session reset query when a connection is released, because archive queries never
+create session state; asyncpg still rolls back any open transaction.
+
 Representations are written before SQL commit using immutable, conditional writes.
 Filesystem storage writes a temporary file, `fsync`s it, publishes it with a hard
 link, and then `fsync`s the containing directory; directories it creates are also
 synced into their parents. The bytes and their directory entries are therefore
 durable before PostgreSQL commits a reference to them. Each representation write
 costs these synchronous flushes; on network filesystems, measure write latency.
+Filesystem storage runs each representation write as one blocking call on a worker
+thread. Each S3 client keeps up to 64 HTTP connections per process, because uploads
+hold no database connection and can all be in flight at once.
 S3 uses `If-None-Match: *`; the object store is responsible for durability once
 it acknowledges the PUT.
 Each parsed snapshot gets a fresh, server-generated allocation UUID. Each physical
@@ -515,11 +549,14 @@ B writes K_B and commits a reference to K_B.
 A compensates by deleting only K_A; K_B remains intact.
 ```
 
-If work fails before the transaction body finishes, the service attempts to remove
-objects created by that attempt. A commit error after the transaction body finishes
-is ambiguous: PostgreSQL may already reference the objects, so the service keeps
-them rather than risking data loss. Rollback failures or process crashes can also
-leave orphan objects. Later submissions use new private allocations rather than
+If an upload or the second transaction fails before the version is inserted, the
+service attempts to remove objects created by that attempt; it does the same when
+the second transaction settles on a result that references none of them. A commit
+error after the version insert is ambiguous: PostgreSQL may already reference the
+objects, so the service keeps them rather than risking data loss. A failed cleanup
+is logged and does not change the request's result or error. Cleanup failures and
+process crashes, for example between upload and the second transaction, can
+therefore leave orphan objects. Later submissions use new private allocations rather than
 adopting those orphans. Reclaiming unreferenced content is a separate operation
 which must protect in-flight/uncertain writes as well as check committed references;
 the absence of a visible database row alone does not make deletion safe. Retry with the same
@@ -1018,6 +1055,16 @@ Sqitch project under [`db/archive`](../db/archive). It uses
 uses the same archive database configuration; other services use their application
 database settings.
 
+`ARCHIVE_POSTGRESQL_MAX_POOL_SIZE` bounds the connections of one archive process.
+The archive service defaults to 20, and the core Helm chart sets the same value
+explicitly through `database.archivePostgresql.maxPoolSize`; other services keep
+the shared default of 5. Snapshot writes hold a connection only
+for one unlocked read and one short transaction, never during uploads, so the pool is sized for
+concurrent database work: downloads, details, search, deletion cleanup, and write
+decisions. Connections open on demand up to the bound. Budget PostgreSQL
+`max_connections` for archive replicas × `maxPoolSize`, plus the expiration
+CronJob, which uses the same setting, and migrations.
+
 The service also needs NATS JetStream, the configured storage backends, temporary
 storage for temporary sources, document-type service/cache configuration, and any
 services required by selected document sources. `make db-deploy` applies both local
@@ -1145,7 +1192,32 @@ make archive-test
 ```
 
 It covers workflow submission, version policies, immutable storage, replay,
-rollback, deletion, expiration, reconciliation, and event publication. The local
+rollback, deletion, expiration, reconciliation, and event publication.
+
+The insertion load test drives the real write path (manifest validation and
+hashing, the storage backend, and the write's reads and transactions) on uvloop, the
+event loop the service runs on, with concurrent writers against a disposable
+PostgreSQL database:
+
+```console
+ARCHIVE_POSTGRES_TEST_DSN=postgresql://dev:dev@postgres:5432/postgres make archive-load-test
+```
+
+It reports throughput, request latency percentiles, the time spent inside the
+locked transactions (how long the document lock is held), and per-file upload time
+for five scenarios: new documents, new versions, unchanged resubmissions, exact
+retries, and many writers on one document. It then checks the stored state:
+version, representation, and replay-record counts, one stored file per
+representation, and no leftover temporary files (stored files are counted only for
+the default local storage). CI runs it after `make verify`
+and shows the table in the job summary. It fails on incorrect state; latency is
+only gated when a budget is passed, for example
+`make archive-load-test ARCHIVE_LOAD_TEST_ARGS="--max-p95-ms 500"`. Use
+`--storage-dir` to measure a specific volume, such as a network filesystem, or
+`--storage-config` with a storage configuration file (the format of
+`ARCHIVE_STORAGE_CONFIG_PATH`) to measure the backend of its `default` archive, such
+as S3; the objects the run stored there are deleted afterwards. HTTP
+multipart parsing, network transfer, and NATS publication are not measured. The local
 end-to-end generation/signing/archive scenario is:
 
 ```console
