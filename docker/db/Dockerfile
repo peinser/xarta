@@ -4,4 +4,4 @@ WORKDIR /app
 COPY --chown=sqitch:sqitch ./docker/db/entrypoint.sh ./entrypoint.sh
 COPY --chown=sqitch:sqitch ./db/ .
 
-ENTRYPOINT sh entrypoint.sh $0 $@
+ENTRYPOINT ["bash", "entrypoint.sh"]

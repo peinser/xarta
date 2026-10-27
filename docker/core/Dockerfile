@@ -45,6 +45,7 @@ FROM builder-base AS validate
 LABEL artifact=false
 
 COPY tests ./tests
+COPY contracts ./contracts
 COPY apps/postal-station ./apps/postal-station
 COPY examples ./examples
 COPY db ./db
