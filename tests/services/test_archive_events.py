@@ -62,10 +62,12 @@ async def test_direct_event_is_deterministic_cloudevent_without_storage_coordina
         representations=[
             {
                 "representation_id": str(representation_id),
+                "name": None,
                 "content_type": "application/pdf",
                 "metadata": {},
                 "checksum": {"sha512": "ab" * 64},
                 "size": 10,
+                "state": "available",
             }
         ],
         occurred_at=occurred_at,
@@ -85,8 +87,24 @@ async def test_direct_event_is_deterministic_cloudevent_without_storage_coordina
     assert payload["specversion"] == "1.0"
     assert payload["id"] == str(first)
     assert payload["time"] == "2030-01-01T00:00:00Z"
-    assert payload["data"]["default_representation_id"] == str(representation_id)
-    assert payload["data"]["representations"][0]["checksum"] == {"sha512": "ab" * 64}
+    assert payload["data"]["id"] == str(document_id)
+    assert payload["data"]["version"] == {"id": str(version_id), "parent": None}
+    assert payload["data"]["representations"] == {
+        "default": str(representation_id),
+        "items": [
+            {
+                "id": str(representation_id),
+                "name": "payslip.pdf",
+                "metadata": {"generator": "renderer"},
+                "content": {
+                    "type": "application/pdf",
+                    "checksum": {"sha512": "ab" * 64},
+                    "size_bytes": 10,
+                    "availability": "available",
+                },
+            }
+        ],
+    }
     serialized = orjson.dumps(payload)
     for private_field in (b"storage_key", b"backend", b"credential", b"physical_path"):
         assert private_field not in serialized

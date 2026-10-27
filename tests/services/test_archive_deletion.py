@@ -512,8 +512,8 @@ async def test_completed_deletion_redelivery_republishes_original_fact(
     assert payload["time"] == "2030-01-02T12:30:00Z"
     assert payload["data"] == {
         "archive": current.archive,
-        "document_id": str(current.document_id),
-        "version_id": str(stored["deleted_head_version_id"]),
+        "id": str(current.document_id),
+        "head": str(stored["deleted_head_version_id"]),
         "outcome": "deleted",
     }
     assert (

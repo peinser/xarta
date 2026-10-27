@@ -118,7 +118,7 @@ async def _retrieve_versions(
         {
             "archive": archive,
             "id": str(document_id),
-            "head_version_id": str(page.head_version_id),
+            "head": str(page.head_version_id),
             **representation,
         }
     )

@@ -81,7 +81,7 @@ class FakeSession:
                 {
                     "archive": "default",
                     "id": "10000000-0000-0000-0000-000000000001",
-                    "head_version_id": "20000000-0000-0000-0000-000000000002",
+                    "head": "20000000-0000-0000-0000-000000000002",
                     "items": [],
                     "pagination": {"limit": 50, "next": None},
                 },
@@ -97,7 +97,7 @@ class FakeSession:
                         "id": "20000000-0000-0000-0000-000000000002",
                         "parent": None,
                     },
-                    "content_availability": "available",
+                    "availability": "available",
                     "representations": {
                         "default": "30000000-0000-0000-0000-000000000003",
                         "items": [
@@ -159,7 +159,7 @@ class MetadataOnlyArchiveSession(FakeSession):
         response = super().request(method, url, **kwargs)
         if url.endswith("/details"):
             payload = orjson.loads(response.body)
-            payload["content_availability"] = "metadata-only"
+            payload["availability"] = "metadata-only"
             payload["representations"]["items"][0]["content"][
                 "availability"
             ] = "metadata-only"
@@ -315,7 +315,7 @@ async def test_mcp_exposes_document_types_and_bounded_archive_resources(
     )
     assert archived.content[0].mime_type == "text/plain"
     assert archived.content[0].uri == uri
-    assert versions.structured_content["body"]["head_version_id"] == version_id
+    assert versions.structured_content["body"]["head"] == version_id
     assert templates.resource_templates[0].uri_template.startswith("xarta-archive://")
     assert base64.b64decode(content.contents[0].blob) == b"test"
 

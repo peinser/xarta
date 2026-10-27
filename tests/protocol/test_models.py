@@ -77,7 +77,7 @@ def test_archive_version_round_trip_keeps_representation_metadata_separate() -> 
         "size_bytes": 10,
         "availability": "available",
     }
-    assert serialized["content_availability"] == "available"
+    assert serialized["availability"] == "available"
     assert serialized["created_at"] == document.created.isoformat()
     assert serialized["expires_at"] is None
     restored = ArchiveDocumentVersion.fromdict(serialized)

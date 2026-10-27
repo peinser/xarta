@@ -12,6 +12,7 @@ import orjson
 
 from opentelemetry import trace
 
+from xarta.protocol.document.archive import ArchiveRepresentation
 from xarta.telemetry import nats_producer_span
 
 EVENT_TOKENS = {
@@ -21,14 +22,9 @@ EVENT_TOKENS = {
     "xarta.archive.document.deleted": "deleted",
 }
 
-REPRESENTATION_EVENT_FIELDS = {
-    "representation_id",
-    "name",
-    "content_type",
-    "metadata",
-    "checksum",
-    "size",
-    "state",
+VERSION_EVENTS = {
+    "xarta.archive.document.created",
+    "xarta.archive.document.version-created",
 }
 
 
@@ -73,46 +69,54 @@ async def publish_archive_event(
     representations: list[dict[str, Any]] | None = None,
     occurred_at: datetime.datetime | None = None,
 ) -> UUID:
+    """Publish a lifecycle fact using the HTTP API's resource shapes.
+
+    Version events carry the snapshot as `version: {id, parent}` and
+    `representations: {default, items}`. Deletion events identify the deleted
+    document's HEAD version as the scalar `head`. `representations` receives the
+    internal write-result dictionaries and is serialized like HTTP details.
+    """
     if event_type not in EVENT_TOKENS:
         raise ValueError(f"Unsupported archive event type: {event_type}")
-    if event_type in {
-        "xarta.archive.document.created",
-        "xarta.archive.document.version-created",
-    } and (
-        version_id is None
-        or metadata is None
-        or default_representation_id is None
-        or not representations
-    ):
-        raise ValueError("Archive version events require a complete snapshot")
+
+    data: dict[str, Any] = {"archive": archive, "id": str(document_id)}
+    if event_type in VERSION_EVENTS:
+        if (
+            version_id is None
+            or metadata is None
+            or default_representation_id is None
+            or not representations
+        ):
+            raise ValueError("Archive version events require a complete snapshot")
+        data["version"] = {
+            "id": str(version_id),
+            "parent": str(parent_version_id) if parent_version_id else None,
+        }
+        data["document_type"] = document_type
+        data["metadata"] = metadata
+        data["representations"] = {
+            "default": str(default_representation_id),
+            "items": [
+                ArchiveRepresentation(
+                    representation_id=UUID(str(item["representation_id"])),
+                    name=item["name"],
+                    content_type=item["content_type"],
+                    metadata=item["metadata"],
+                    checksum=item["checksum"]["sha512"],
+                    size=item["size"],
+                    state=item["state"],
+                ).dict()
+                for item in representations
+            ],
+        }
+    elif version_id is not None:
+        data["head"] = str(version_id)
+    if outcome is not None:
+        data["outcome"] = outcome
 
     event_id = archive_event_id(
         event_type, archive, document_id, aggregate_id, version_internal_id
     )
-    data: dict[str, Any] = {"archive": archive, "document_id": str(document_id)}
-    optional = {
-        "version_id": str(version_id) if version_id else None,
-        "parent_version_id": str(parent_version_id) if parent_version_id else None,
-        "outcome": outcome,
-        "document_type": document_type,
-        "metadata": metadata,
-        "default_representation_id": (
-            str(default_representation_id) if default_representation_id else None
-        ),
-        "representations": (
-            [
-                {
-                    key: value
-                    for key, value in representation.items()
-                    if key in REPRESENTATION_EVENT_FIELDS
-                }
-                for representation in representations
-            ]
-            if representations is not None
-            else None
-        ),
-    }
-    data.update({key: value for key, value in optional.items() if value is not None})
     payload = {
         "specversion": "1.0",
         "id": str(event_id),

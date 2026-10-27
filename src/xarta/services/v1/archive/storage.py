@@ -41,6 +41,26 @@ class StorageBackend(Protocol):
     async def delete(self, key: str) -> None: ...
 
 
+def _fsync_directory(directory: str) -> None:
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _make_durable_directories(directory: str) -> None:
+    """Create missing directories and sync each new entry into its parent."""
+    missing = []
+    current = directory
+    while not os.path.isdir(current):
+        missing.append(current)
+        current = os.path.dirname(current)
+    os.makedirs(directory, exist_ok=True)
+    for created in reversed(missing):
+        _fsync_directory(os.path.dirname(created))
+
+
 class FilesystemStorageBackend:
     def __init__(self, root: str) -> None:
         self.root = os.path.abspath(root)
@@ -66,23 +86,29 @@ class FilesystemStorageBackend:
         return path
 
     async def put(self, key: str, data: bytes, content_type: str) -> bool:
+        # The database commits a reference to this key after put() returns, so
+        # the bytes and the directory entries leading to them must be durable.
         del content_type
         path = self._path(key)
-        await aiofiles.os.makedirs(os.path.dirname(path), exist_ok=True)
+        directory = os.path.dirname(path)
+        await asyncio.to_thread(_make_durable_directories, directory)
         temporary = f"{path}.{uuid.uuid4()}.tmp"
         try:
             async with aiofiles.open(temporary, "xb") as stream:
                 await stream.write(data)
                 await stream.flush()
+                await asyncio.to_thread(os.fsync, stream.fileno())
             try:
                 await asyncio.to_thread(os.link, temporary, path)
-                return True
+                created = True
             except FileExistsError as ex:
                 if await self.get(key) != data:
                     raise FileExistsError(
                         f"Immutable storage key already exists: {key}"
                     ) from ex
-                return False
+                created = False
+            await asyncio.to_thread(_fsync_directory, directory)
+            return created
         finally:
             with contextlib.suppress(FileNotFoundError):
                 await aiofiles.os.remove(temporary)

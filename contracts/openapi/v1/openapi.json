@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Xarta HTTP and Workflow Capabilities API",
-    "version": "7.0.0",
+    "version": "8.0.0",
     "summary": "Contracts for all implemented Xarta v1 HTTP services and intake workflow nodes.",
     "description": "The union of independently deployable services. A deployment may expose only a subset; discover enabled workflow kinds at /api/v1/intake/capabilities. HTTP acceptance does not imply workflow completion. Canonical API paths are version-pinned; x-path-alias records the floating /api alias. Security requirements describe service-level enforcement only; ingress authorization is deployment-specific. NATS and MCP are separate protocols, not REST operations. See contracts/openapi/README.md for versioning and maintenance. Named examples use synthetic invoice/customer identities and reserved example domains. Unless explicitly tied to repository configuration or vendored UBL fixtures, destinations, templates, policies, provider references, timestamps, hashes and credentials are illustrative. Binary uploads/downloads use file-oriented x-codeSamples rather than fake JSON bytes. See contracts/openapi/README.md for the example scenarios and prerequisites.",
     "license": {
@@ -1726,6 +1726,15 @@
                         "message": "A snapshot manifest is required."
                       }
                     }
+                  },
+                  "UnknownDocumentType": {
+                    "summary": "The manifest names a document type the service does not know",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "Unknown document type: purchase-order"
+                      }
+                    }
                   }
                 }
               }
@@ -1763,7 +1772,7 @@
             }
           },
           "409": {
-            "description": "Snapshot identity or version conflict",
+            "description": "Semantic conflict; error.code is version_conflict, overwrite_rejected, deletion_in_progress or document_deleted. Nothing new is stored.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1771,11 +1780,79 @@
                 },
                 "examples": {
                   "ArchiveConflict": {
-                    "summary": "A version identity was reused for different content",
+                    "summary": "A version or representation identity was reused for a different snapshot",
+                    "description": "Also returned when a representation ID already exists anywhere on the service.",
                     "value": {
                       "error": {
                         "code": "version_conflict",
                         "message": "Version identity already exists"
+                      }
+                    }
+                  },
+                  "ArchiveParentConflict": {
+                    "summary": "version.parent no longer matches HEAD",
+                    "value": {
+                      "error": {
+                        "code": "version_conflict",
+                        "message": "parent version does not match HEAD"
+                      }
+                    }
+                  },
+                  "ArchiveIdempotencyConflict": {
+                    "summary": "An Idempotency-Key was reused with a changed manifest or files",
+                    "value": {
+                      "error": {
+                        "code": "version_conflict",
+                        "message": "Idempotency key or version identity was reused with changed semantics"
+                      }
+                    }
+                  },
+                  "ArchiveOverwriteRejected": {
+                    "summary": "A create-only archive already holds this document",
+                    "value": {
+                      "error": {
+                        "code": "overwrite_rejected",
+                        "message": "Archive policy only permits document creation"
+                      }
+                    }
+                  },
+                  "ArchiveDeletionInProgress": {
+                    "summary": "The document is being deleted",
+                    "value": {
+                      "error": {
+                        "code": "deletion_in_progress",
+                        "message": "Archive document deletion is in progress"
+                      }
+                    }
+                  },
+                  "ArchiveDocumentDeleted": {
+                    "summary": "The document identity is a deletion tombstone",
+                    "value": {
+                      "error": {
+                        "code": "document_deleted",
+                        "message": "Archive document identity is deleted"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The complete multipart request body (manifest, every representation part and multipart framing) exceeds the receiving deployment's request size limit. The core Helm chart sets 50 MiB (52,428,800 bytes) through services.archive.settings.maxRequestBodyBytes; outside Helm the Sanic default of 100,000,000 bytes applies unless SANIC_REQUEST_MAX_SIZE is set. The request is rejected before the manifest is parsed: nothing is stored and no idempotency record is created, so retrying the same request fails again. An ingress or gateway in front of the service can reject first with its own non-JSON body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "ArchiveRequestTooLarge": {
+                    "summary": "Snapshot exceeds the 50 MiB Helm default",
+                    "description": "A two-representation invoice snapshot whose PDF scan and XML together exceed 52,428,800 bytes.",
+                    "value": {
+                      "error": {
+                        "code": "content_too_large",
+                        "message": "Request body exceeds the size limit"
                       }
                     }
                   }
@@ -1821,7 +1898,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
             },
             "example": "default"
           },
@@ -1830,9 +1908,10 @@
             "in": "header",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             },
-            "description": "Reuse for the identical snapshot; explicitly supply manifest.created_at to make retries stable.",
+            "description": "Strongly recommended for every write. A timeout, dropped connection or 5xx response does not prove that nothing was stored: the snapshot can be committed before an error is returned, for example when lifecycle-event publication fails after the database commit. Retry with the same key and the identical manifest, including the same created_at, and the same files to receive the original result with HTTP 200 instead of a duplicate. The key is scoped to the archive; reusing it for a different snapshot returns 409 version_conflict. Without a key the service generates a fresh one: omitted document and version IDs are then new on every request, so a retry creates a duplicate document, and an omitted created_at defaults to server time, so a retry of an explicit identity conflicts instead of replaying.",
             "example": "invoice-2026-0042-snapshot-v1"
           }
         ],
@@ -1866,7 +1945,7 @@
           },
           "description": "manifest is a JSON-encoded form string, not an uploaded file. Other parts are binary files named by manifest.representations.items[].field."
         },
-        "description": "Unscoped routes use archive=default. Returns 201 for a newly created document/version, 200 for replay or an existing equivalent snapshot. Different content under a reused identity conflicts. Physical allocations are private to each submission so failed-write compensation cannot delete a concurrent retry's allocation. Logical identities and semantic idempotency remain stable; committed replays are resolved before object persistence. Crashes or uncertain commits can still leave unreferenced content for separate cleanup.",
+        "description": "Unscoped routes use archive=default. Returns 201 for a newly created document/version, 200 for replay or an existing equivalent snapshot. Different content under a reused identity conflicts. Physical allocations are private to each submission so failed-write compensation cannot delete a concurrent retry's allocation. Logical identities and semantic idempotency remain stable; committed replays are resolved before object persistence. Crashes or uncertain commits can still leave unreferenced content for separate cleanup. The whole request body is size-limited per deployment (50 MiB with the core Helm chart defaults); see the 413 response. Always send an Idempotency-Key with a stable created_at so that a retry after a timeout or 5xx cannot create a duplicate; see the Idempotency-Key parameter.",
         "x-codeSamples": [
           {
             "lang": "Shell",
@@ -2060,7 +2139,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
             },
             "example": "default"
           },
@@ -2187,7 +2267,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
             },
             "example": "default"
           },
@@ -2400,7 +2481,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
             },
             "example": "default"
           },
@@ -2554,7 +2636,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
             },
             "example": "default"
           },
@@ -2698,7 +2781,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
             },
             "example": "default"
           },
@@ -2808,7 +2892,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
             },
             "example": "default"
           },
@@ -2924,7 +3009,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
             },
             "example": "default"
           },
@@ -3044,7 +3130,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
             },
             "example": "default"
           },
@@ -3191,7 +3278,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
             },
             "example": "default"
           },
@@ -3293,6 +3381,15 @@
                         "message": "A snapshot manifest is required."
                       }
                     }
+                  },
+                  "UnknownDocumentType": {
+                    "summary": "The manifest names a document type the service does not know",
+                    "value": {
+                      "error": {
+                        "code": "bad_request",
+                        "message": "Unknown document type: purchase-order"
+                      }
+                    }
                   }
                 }
               }
@@ -3330,7 +3427,7 @@
             }
           },
           "409": {
-            "description": "Snapshot identity or version conflict",
+            "description": "Semantic conflict; error.code is version_conflict, overwrite_rejected, deletion_in_progress or document_deleted. Nothing new is stored.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3338,11 +3435,79 @@
                 },
                 "examples": {
                   "ArchiveConflict": {
-                    "summary": "A version identity was reused for different content",
+                    "summary": "A version or representation identity was reused for a different snapshot",
+                    "description": "Also returned when a representation ID already exists anywhere on the service.",
                     "value": {
                       "error": {
                         "code": "version_conflict",
                         "message": "Version identity already exists"
+                      }
+                    }
+                  },
+                  "ArchiveParentConflict": {
+                    "summary": "version.parent no longer matches HEAD",
+                    "value": {
+                      "error": {
+                        "code": "version_conflict",
+                        "message": "parent version does not match HEAD"
+                      }
+                    }
+                  },
+                  "ArchiveIdempotencyConflict": {
+                    "summary": "An Idempotency-Key was reused with a changed manifest or files",
+                    "value": {
+                      "error": {
+                        "code": "version_conflict",
+                        "message": "Idempotency key or version identity was reused with changed semantics"
+                      }
+                    }
+                  },
+                  "ArchiveOverwriteRejected": {
+                    "summary": "A create-only archive already holds this document",
+                    "value": {
+                      "error": {
+                        "code": "overwrite_rejected",
+                        "message": "Archive policy only permits document creation"
+                      }
+                    }
+                  },
+                  "ArchiveDeletionInProgress": {
+                    "summary": "The document is being deleted",
+                    "value": {
+                      "error": {
+                        "code": "deletion_in_progress",
+                        "message": "Archive document deletion is in progress"
+                      }
+                    }
+                  },
+                  "ArchiveDocumentDeleted": {
+                    "summary": "The document identity is a deletion tombstone",
+                    "value": {
+                      "error": {
+                        "code": "document_deleted",
+                        "message": "Archive document identity is deleted"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The complete multipart request body (manifest, every representation part and multipart framing) exceeds the receiving deployment's request size limit. The core Helm chart sets 50 MiB (52,428,800 bytes) through services.archive.settings.maxRequestBodyBytes; outside Helm the Sanic default of 100,000,000 bytes applies unless SANIC_REQUEST_MAX_SIZE is set. The request is rejected before the manifest is parsed: nothing is stored and no idempotency record is created, so retrying the same request fails again. An ingress or gateway in front of the service can reject first with its own non-JSON body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveError"
+                },
+                "examples": {
+                  "ArchiveRequestTooLarge": {
+                    "summary": "Snapshot exceeds the 50 MiB Helm default",
+                    "description": "A two-representation invoice snapshot whose PDF scan and XML together exceed 52,428,800 bytes.",
+                    "value": {
+                      "error": {
+                        "code": "content_too_large",
+                        "message": "Request body exceeds the size limit"
                       }
                     }
                   }
@@ -3388,9 +3553,10 @@
             "in": "header",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             },
-            "description": "Reuse for the identical snapshot; explicitly supply manifest.created_at to make retries stable.",
+            "description": "Strongly recommended for every write. A timeout, dropped connection or 5xx response does not prove that nothing was stored: the snapshot can be committed before an error is returned, for example when lifecycle-event publication fails after the database commit. Retry with the same key and the identical manifest, including the same created_at, and the same files to receive the original result with HTTP 200 instead of a duplicate. The key is scoped to the archive; reusing it for a different snapshot returns 409 version_conflict. Without a key the service generates a fresh one: omitted document and version IDs are then new on every request, so a retry creates a duplicate document, and an omitted created_at defaults to server time, so a retry of an explicit identity conflicts instead of replaying.",
             "example": "invoice-2026-0042-snapshot-v1"
           }
         ],
@@ -3424,7 +3590,7 @@
           },
           "description": "manifest is a JSON-encoded form string, not an uploaded file. Other parts are binary files named by manifest.representations.items[].field."
         },
-        "description": "Unscoped routes use archive=default. Returns 201 for a newly created document/version, 200 for replay or an existing equivalent snapshot. Different content under a reused identity conflicts. Physical allocations are private to each submission so failed-write compensation cannot delete a concurrent retry's allocation. Logical identities and semantic idempotency remain stable; committed replays are resolved before object persistence. Crashes or uncertain commits can still leave unreferenced content for separate cleanup.",
+        "description": "Unscoped routes use archive=default. Returns 201 for a newly created document/version, 200 for replay or an existing equivalent snapshot. Different content under a reused identity conflicts. Physical allocations are private to each submission so failed-write compensation cannot delete a concurrent retry's allocation. Logical identities and semantic idempotency remain stable; committed replays are resolved before object persistence. Crashes or uncertain commits can still leave unreferenced content for separate cleanup. The whole request body is size-limited per deployment (50 MiB with the core Helm chart defaults); see the 413 response. Always send an Idempotency-Key with a stable created_at so that a retry after a timeout or 5xx cannot create a duplicate; see the Idempotency-Key parameter.",
         "x-codeSamples": [
           {
             "lang": "Shell",
@@ -12340,18 +12506,18 @@
             ],
             "description": "Retention/expiry boundary, including timezone, or null. Cleanup is asynchronous; this is not a deletion-completion timestamp."
           },
-          "content_availability": {
+          "availability": {
             "enum": [
               "available",
               "metadata-only"
             ],
-            "description": "Aggregate content retention: available while at least one representation retains bytes; metadata-only when none do. All versions now retain content until logical-document deletion. Metadata-only or partially available active versions can remain from older deployments that removed historical content; the default representation may be unavailable in those records."
+            "description": "Aggregate of the representations' content.availability: available while at least one representation of this version retains bytes; metadata-only when none do. All versions retain content until logical-document deletion. Metadata-only or partially available active versions can remain from older deployments that removed historical content; the default representation may be unavailable in those records."
           },
           "representations": {
             "$ref": "#/components/schemas/ArchiveRepresentationSet"
           }
         },
-        "additionalProperties": true,
+        "additionalProperties": false,
         "required": [
           "id",
           "archive",
@@ -12360,7 +12526,7 @@
           "metadata",
           "created_at",
           "expires_at",
-          "content_availability",
+          "availability",
           "representations"
         ],
         "examples": [
@@ -12380,7 +12546,7 @@
             },
             "created_at": "2026-10-14T09:30:00+00:00",
             "expires_at": "2036-10-14T09:30:00+00:00",
-            "content_availability": "available",
+            "availability": "available",
             "representations": {
               "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
               "items": [
@@ -12436,7 +12602,7 @@
             },
             "created_at": "2026-10-14T11:00:00+00:00",
             "expires_at": "2036-10-14T09:30:00+00:00",
-            "content_availability": "available",
+            "availability": "available",
             "representations": {
               "default": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
               "items": [
@@ -12491,7 +12657,7 @@
             },
             "created_at": "2026-10-14T09:30:00+00:00",
             "expires_at": "2026-10-14T09:35:00+00:00",
-            "content_availability": "metadata-only",
+            "availability": "metadata-only",
             "representations": {
               "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
               "items": [
@@ -12625,7 +12791,7 @@
         "required": [
           "representations"
         ],
-        "description": "Complete immutable snapshot. created_at is required and must be stable when Idempotency-Key is supplied; otherwise it defaults to server time. expires_at must be later than created_at; a document type may supply a default retention interval. representations.default must identify an item and is required for multiple items. Fields and representation IDs must be unique. Omitted IDs are derived. Unknown fields, including obsolete flat identities, are rejected. Version identity and expected-parent checks precede equivalent-snapshot detection.",
+        "description": "Complete immutable snapshot. created_at is required and must be stable when Idempotency-Key is supplied; otherwise it defaults to server time. expires_at must be later than created_at; a document type may supply a default retention interval. representations.default must identify an item and is required for multiple items. Multipart fields must be unique within the snapshot. Representation IDs must be globally unique on the receiving service; see representations.items[].id. Omitted IDs are derived. Unknown fields, including obsolete flat identities, are rejected. Version identity and expected-parent checks precede equivalent-snapshot detection.",
         "examples": [
           {
             "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
@@ -12734,7 +12900,12 @@
             "$ref": "#/components/schemas/ArchiveVersionIdentity"
           },
           "outcome": {
-            "type": "string"
+            "enum": [
+              "created",
+              "version_created",
+              "unchanged"
+            ],
+            "description": "created: the first version of a new document (HTTP 201). version_created: a new version became HEAD (HTTP 201). unchanged: the snapshot equals current HEAD and the existing version is returned (HTTP 200). An exact retry returns the original outcome with HTTP 200."
           }
         },
         "additionalProperties": false,
@@ -12850,9 +13021,10 @@
             "format": "uuid",
             "description": "Logical document UUID, scoped to the archive."
           },
-          "head_version_id": {
+          "head": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "UUID of the document's current HEAD version. Compare it with items[].version.id; the first item is the latest created_at, not necessarily HEAD."
           },
           "items": {
             "type": "array",
@@ -12864,11 +13036,11 @@
             "$ref": "#/components/schemas/CursorPagination"
           }
         },
-        "additionalProperties": true,
+        "additionalProperties": false,
         "required": [
           "archive",
           "id",
-          "head_version_id",
+          "head",
           "items",
           "pagination"
         ],
@@ -12876,7 +13048,7 @@
           {
             "archive": "default",
             "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-            "head_version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+            "head": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
             "items": [
               {
                 "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
@@ -12894,7 +13066,7 @@
                 },
                 "created_at": "2026-10-14T09:30:00+00:00",
                 "expires_at": "2036-10-14T09:30:00+00:00",
-                "content_availability": "available",
+                "availability": "available",
                 "representations": {
                   "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
                   "items": [
@@ -12942,7 +13114,7 @@
           {
             "archive": "default",
             "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-            "head_version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+            "head": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
             "items": [],
             "pagination": {
               "limit": 50,
@@ -15233,7 +15405,8 @@
                     {
                       "type": "null"
                     }
-                  ]
+                  ],
+                  "description": "Globally unique across every archive, document and version on the receiving service; never reuse it for another version or document. Omit it for a single representation to derive a fresh ID from the node execution, or use a flow-profile $generated UUID."
                 },
                 "name": {
                   "type": [
@@ -15291,7 +15464,8 @@
                           {
                             "type": "null"
                           }
-                        ]
+                        ],
+                        "description": "Globally unique across every archive, document and version on the receiving service; never reuse it for another version or document. Omit it for a single representation to derive a fresh ID from the node execution, or use a flow-profile $generated UUID."
                       },
                       "name": {
                         "type": [
@@ -18939,31 +19113,23 @@
             "type": "string"
           },
           "checksum": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "sha512": {
-                    "type": "string",
-                    "pattern": "^[0-9a-f]{128}$"
-                  }
-                },
-                "additionalProperties": false,
-                "required": [
-                  "sha512"
-                ]
-              },
-              {
-                "type": "null"
+            "type": "object",
+            "properties": {
+              "sha512": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{128}$"
               }
-            ]
+            },
+            "additionalProperties": false,
+            "required": [
+              "sha512"
+            ],
+            "description": "SHA-512 of the original bytes; still present after the bytes are removed."
           },
           "size_bytes": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "minimum": 0
+            "type": "integer",
+            "minimum": 0,
+            "description": "Size of the original bytes; still present after the bytes are removed."
           },
           "availability": {
             "enum": [
@@ -19098,7 +19264,8 @@
               "string",
               "null"
             ],
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Representation IDs are globally unique on the receiving archive service: across every archive, document and version, not only within this snapshot. Never reuse one for a later version or another document; a reused ID returns 409 version_conflict. Generate a fresh UUID for each representation of each new version, or omit it to let the service derive one from the version identity."
           },
           "name": {
             "type": [
@@ -19160,8 +19327,23 @@
             "type": "object",
             "properties": {
               "code": {
-                "type": "string",
-                "minLength": 1
+                "enum": [
+                  "ambiguous_representation",
+                  "bad_request",
+                  "content_too_large",
+                  "deletion_in_progress",
+                  "document_deleted",
+                  "forbidden",
+                  "internal_server_error",
+                  "not_acceptable",
+                  "not_found",
+                  "overwrite_rejected",
+                  "request_timeout",
+                  "service_unavailable",
+                  "unsupported_media_type",
+                  "version_conflict"
+                ],
+                "description": "Stable machine-readable code; branch on this, not on message. Archive-specific codes: version_conflict (409: reused version, representation or idempotency identity with different semantics, or version.parent does not match HEAD), overwrite_rejected (409: create-only archive), deletion_in_progress (409: the document is being deleted), document_deleted (409: the identity is a deletion tombstone and cannot be reused), ambiguous_representation (300) and not_acceptable (406). Other codes are the HTTP status name: bad_request (400, including an unknown document_type), forbidden (403: unsafe deletion), not_found (404), request_timeout (408), content_too_large (413), unsupported_media_type (415), internal_server_error (500, including failed integrity verification) and service_unavailable (503)."
               },
               "message": {
                 "type": "string"
@@ -22793,7 +22975,7 @@
           },
           "created_at": "2026-10-14T09:30:00+00:00",
           "expires_at": "2036-10-14T09:30:00+00:00",
-          "content_availability": "available",
+          "availability": "available",
           "representations": {
             "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
             "items": [
@@ -22922,7 +23104,7 @@
       },
       "ArchiveNewVersionManifest": {
         "summary": "Append a complete second version with its parent identity",
-        "description": "Appending version 43d7c2eb-ce46-568b-a7af-fe0b2318af7d preserves version 6518eb3c-c1eb-5f49-a1bf-67c91308e31e and all its representation bytes. Only deleting the logical document removes both versions.",
+        "description": "Requires an archive policy permitting versions. Resend both representation files; a version is a full snapshot, not a metadata patch. Appending version 43d7c2eb-ce46-568b-a7af-fe0b2318af7d preserves version 6518eb3c-c1eb-5f49-a1bf-67c91308e31e and all its representation bytes. Only deleting the logical document removes both versions.",
         "value": {
           "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
           "version": {
@@ -22968,8 +23150,7 @@
               }
             ]
           }
-        },
-        "description": "Requires an archive policy permitting versions. Resend both representation files; a version is a full snapshot, not a metadata patch."
+        }
       },
       "ArchiveVersionCreated": {
         "summary": "A second immutable version was appended",
@@ -22989,7 +23170,7 @@
         "value": {
           "archive": "default",
           "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-          "head_version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+          "head": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
           "items": [
             {
               "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
@@ -23007,7 +23188,7 @@
               },
               "created_at": "2026-10-14T09:30:00+00:00",
               "expires_at": "2036-10-14T09:30:00+00:00",
-              "content_availability": "available",
+              "availability": "available",
               "representations": {
                 "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
                 "items": [
@@ -23059,7 +23240,7 @@
         "value": {
           "archive": "default",
           "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-          "head_version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+          "head": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
           "items": [
             {
               "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
@@ -23077,7 +23258,7 @@
               },
               "created_at": "2026-10-14T09:30:00+00:00",
               "expires_at": "2036-10-14T09:30:00+00:00",
-              "content_availability": "available",
+              "availability": "available",
               "representations": {
                 "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
                 "items": [
@@ -24510,7 +24691,7 @@
           },
           "created_at": "2026-10-14T11:00:00+00:00",
           "expires_at": "2036-10-14T09:30:00+00:00",
-          "content_availability": "available",
+          "availability": "available",
           "representations": {
             "default": "3812d6e5-4a52-5a3d-a6bf-74eb46f6caf8",
             "items": [
@@ -24569,7 +24750,7 @@
           },
           "created_at": "2026-10-14T09:30:00+00:00",
           "expires_at": "2026-10-14T09:35:00+00:00",
-          "content_availability": "metadata-only",
+          "availability": "metadata-only",
           "representations": {
             "default": "a5f2a8ae-6f5d-59f8-bcff-51e359176286",
             "items": [
@@ -24626,7 +24807,7 @@
         "value": {
           "archive": "default",
           "id": "c3be90e0-24ab-5d38-a39d-3149db97ae22",
-          "head_version_id": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
+          "head": "6518eb3c-c1eb-5f49-a1bf-67c91308e31e",
           "items": [],
           "pagination": {
             "limit": 50,

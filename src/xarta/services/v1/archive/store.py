@@ -18,7 +18,6 @@ from sanic import response
 from xarta import env
 from xarta.exceptions.http import BadRequestError
 from xarta.exceptions.http import NotFoundError
-from xarta.exceptions.protocol import InvalidDocumentType
 from xarta.protocol.document.type import DocumentTypeIdentifier
 from xarta.protocol.document.type.utils import fetch as fetch_document_type
 
@@ -188,7 +187,7 @@ async def _parse_snapshot(request: Request, archive: str) -> ParsedSnapshotReque
     if document_type:
         configuration = await fetch_document_type(document_type)
         if configuration is None:
-            raise InvalidDocumentType(f"Unknown document type: {document_type.value}")
+            raise BadRequestError(f"Unknown document type: {document_type.value}")
         if not expires and configuration.default_retention:
             expires = created + configuration.default_retention
 

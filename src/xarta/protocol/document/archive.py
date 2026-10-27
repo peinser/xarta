@@ -37,10 +37,10 @@ def validate_archive_name(value: object) -> str:
 class ArchiveRepresentation:
     representation_id: UUID
     content_type: str
+    checksum: str  # SHA-512 hex digest of the original bytes.
+    size: int
     metadata: dict[str, Any] = field(default_factory=dict)
     name: str | None = None
-    checksum: str | None = None
-    size: int | None = None
     state: str = "available"
 
     def dict(self) -> dict[str, Any]:
@@ -50,7 +50,7 @@ class ArchiveRepresentation:
             "metadata": self.metadata,
             "content": {
                 "type": self.content_type,
-                "checksum": {"sha512": self.checksum} if self.checksum else None,
+                "checksum": {"sha512": self.checksum},
                 "size_bytes": self.size,
                 "availability": self.state,
             },
@@ -63,7 +63,7 @@ class ArchiveRepresentation:
             name=representation.get("name"),
             content_type=representation["content"]["type"],
             metadata=representation.get("metadata", {}),
-            checksum=(representation["content"]["checksum"] or {}).get("sha512"),
+            checksum=representation["content"]["checksum"]["sha512"],
             size=representation["content"]["size_bytes"],
             state=representation["content"]["availability"],
         )
@@ -112,7 +112,7 @@ class ArchiveDocumentVersion:
             "metadata": self.metadata,
             "created_at": self.created.isoformat(),
             "expires_at": self.expires.isoformat() if self.expires else None,
-            "content_availability": self.state,
+            "availability": self.state,
             "representations": {
                 "default": str(self.default_representation_id),
                 "items": [item.dict() for item in self.representations],
@@ -139,7 +139,7 @@ class ArchiveDocumentVersion:
             metadata=representation.get("metadata", {}),
             created=datetime.datetime.fromisoformat(representation["created_at"]),
             expires=datetime.datetime.fromisoformat(expires) if expires else None,
-            state=representation["content_availability"],
+            state=representation["availability"],
             default_representation_id=UUID(
                 representation["representations"]["default"]
             ),

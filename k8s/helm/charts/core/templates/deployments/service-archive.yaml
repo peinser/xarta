@@ -142,6 +142,9 @@ spec:
           value: {{ .Values.services.archive.settings.timeout | default 30.0 | quote }}
         - name: ARCHIVE_STORAGE
           value: {{ .Values.volumes.archive.path | quote }}
+        # Sanic rejects larger request bodies with HTTP 413 before the handler runs.
+        - name: SANIC_REQUEST_MAX_SIZE
+          value: {{ required "services.archive.settings.maxRequestBodyBytes is required" .Values.services.archive.settings.maxRequestBodyBytes | int64 | quote }}
         - name: ARCHIVE_DELETION_RECONCILER_ENABLED
           value: {{ .Values.services.archive.settings.deletionReconciler.enabled | quote }}
         - name: ARCHIVE_DELETION_RECONCILER_BATCH_SIZE

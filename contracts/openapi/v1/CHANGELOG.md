@@ -1,5 +1,49 @@
 # HTTP API v1 contract revisions
 
+## 8.0.0 — 2026-10-27
+
+Breaking pre-release changes to archive responses; paths and operation IDs are
+unchanged.
+
+- Rename the version-level `content_availability` to `availability` in archive
+  details, version-list items and representation-collection versions. It aggregates
+  the representations' `content.availability` and uses the same name and values.
+- Rename `head_version_id` to `head` in the archive version collection. It remains
+  a scalar version UUID.
+- Archive representation `content.checksum` and `content.size_bytes` are always
+  present; they were never null at runtime and are no longer nullable.
+- Close `ArchiveVersion` and `ArchiveVersionPage` to unknown properties, like the
+  other archive response schemas.
+- An unknown manifest `document_type` now returns `400 bad_request` instead of
+  `404 not_found`, so 404 on a write only means an unknown archive.
+- Enumerate `ArchiveError.error.code` and `ArchiveWriteResult.outcome`, and add
+  examples for every snapshot-write conflict: version, parent and idempotency
+  conflicts, `overwrite_rejected`, `deletion_in_progress` and `document_deleted`.
+- Constrain every `{archive}` path parameter to the archive-name pattern already
+  enforced for archive names.
+- Document that representation IDs are globally unique on the receiving archive
+  service, not only within a snapshot, and that a reused ID returns
+  `409 version_conflict`. This was existing runtime behavior.
+- Emphasize `Idempotency-Key` on snapshot writes: a timeout or 5xx can follow a
+  committed write, and only a retry with the same key and identical manifest is
+  guaranteed not to create a duplicate. An empty key is outside the contract
+  (`minLength: 1`).
+- Reshape archive lifecycle events (documented in `docs/archive-events.md`, not in
+  this OpenAPI document) to the HTTP resource shapes: `data.id`,
+  `data.version: {id, parent}`, `data.representations: {default, items}` for version
+  events and the scalar `data.head` for deletion events.
+- Document `413 content_too_large` for both archive snapshot writes
+  (`storeArchiveSnapshotScoped`, `storeArchiveSnapshotDefault`). The limit applies
+  to the complete multipart request body and is deployment-dependent: the core Helm
+  chart now sets 50 MiB (52,428,800 bytes) through
+  `services.archive.settings.maxRequestBodyBytes`, at both the archive service and
+  its ingress. Without Helm, Sanic's default of 100,000,000 bytes applies.
+  Deployment note: Helm deployments previously accepted up to 100,000,000 bytes at
+  the service (8 MiB at the archive ingress); writes between 50 MiB and that bound
+  are now rejected. Paths, operation IDs and success shapes are unchanged.
+- Merge the duplicated `description` keys of the `ArchiveNewVersionManifest`
+  example into one; JSON parsers previously kept only the second text.
+
 ## 7.0.0 — 2026-10-19
 
 - Reject unknown top-level intake fields in the shared preparation path, including

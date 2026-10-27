@@ -230,6 +230,12 @@ services:
     existingSecret: null
     settings:
       timeout: 30.0 # Operations on the Xarta archive cannot take longer than this timeout.
+      # Maximum archive HTTP request body in bytes (50 MiB). It bounds a complete
+      # multipart snapshot: the manifest, every representation and multipart
+      # framing. The archive service enforces it for all callers, including
+      # in-cluster workflow workers; the archive ingress applies the same limit.
+      # Uploads are held in memory, so size memory requests/limits accordingly.
+      maxRequestBodyBytes: 52428800
       adapters:
         config: null
       storage:

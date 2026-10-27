@@ -8,7 +8,8 @@ kind: Ingress
 metadata:
   annotations:
     {{- include "ingress.defaultAnnotations" $ | indent 4 }}
-    nginx.ingress.kubernetes.io/proxy-body-size: 8m
+    # Match the archive service limit (SANIC_REQUEST_MAX_SIZE) so both layers agree.
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.services.archive.settings.maxRequestBodyBytes | int64 | quote }}
     nginx.ingress.kubernetes.io/proxy-buffering: "on"
   name: {{ .Release.Name }}-api-archive
 spec:

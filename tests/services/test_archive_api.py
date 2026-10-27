@@ -265,7 +265,7 @@ async def test_version_collection_exposes_head_and_cursor(monkeypatch) -> None:
     )
     payload = orjson.loads(result.body)
 
-    assert payload["head_version_id"] == str(head_id)
+    assert payload["head"] == str(head_id)
     assert "current_version_id" not in payload
     assert payload["pagination"]["limit"] == 1
     assert "next_cursor" not in payload

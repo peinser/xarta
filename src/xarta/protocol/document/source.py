@@ -278,10 +278,7 @@ class ArchiveDocumentSource(DocumentSource):
             representation=self.representation,
         )
 
-        if (
-            representation.checksum
-            and hashlib.sha512(binary).hexdigest() != representation.checksum
-        ):
+        if hashlib.sha512(binary).hexdigest() != representation.checksum:
             raise ValueError(
                 "Archived content checksum does not match its version details"
             )

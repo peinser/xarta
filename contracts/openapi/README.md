@@ -73,7 +73,7 @@ The principal scenarios are:
 Archive responses use `id` for the logical document and `version: {id, parent}`
 for the returned snapshot. The parent is a UUID or `null`; it is not an embedded
 version object. Version-list items share this shape, and their collection envelope
-retains `head_version_id` to identify the current head. HTTP input manifests use
+reports the current head version UUID as `head`. HTTP input manifests use
 the same identity shape. Read responses group `representations: {default, items}`;
 each item has `id`, `name`, `metadata`, and
 `content: {type, size_bytes, checksum, availability}`. Upload items supply only

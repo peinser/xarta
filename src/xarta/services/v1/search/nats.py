@@ -169,15 +169,13 @@ _ARCHIVE_EVENTS = {
 }
 
 
-def _archive_event(data: bytes) -> tuple[str, str, UUID, UUID | None]:
+def _archive_event(data: bytes) -> tuple[str, str, UUID]:
     try:
         event = orjson.loads(data)
         event_type = event["type"]
         payload = event["data"]
         archive = validate_archive_name(payload["archive"])
-        document_id = UUID(payload["document_id"])
-        version_value = payload.get("version_id")
-        version_id = UUID(version_value) if version_value is not None else None
+        document_id = UUID(payload["id"])
     except (KeyError, TypeError, ValueError, orjson.JSONDecodeError) as ex:
         raise PermanentError(
             "Malformed archive lifecycle event",
@@ -190,13 +188,13 @@ def _archive_event(data: bytes) -> tuple[str, str, UUID, UUID | None]:
             classification="malformed",
             error_code="malformed_archive_event",
         )
-    return event_type, archive, document_id, version_id
+    return event_type, archive, document_id
 
 
 async def _archive_lifecycle_worker(
     *, msg, components: SearchComponents, **kwargs
 ) -> None:
-    event_type, archive, document_id, version_id = _archive_event(msg.data)
+    event_type, archive, document_id = _archive_event(msg.data)
     if event_type in {
         "xarta.archive.document.created",
         "xarta.archive.document.version-created",

@@ -419,6 +419,8 @@ async def test_search_worker_indexes_and_returns_outcome(monkeypatch) -> None:
                 ArchiveRepresentation(
                     representation_id=representation_id,
                     content_type="text/plain",
+                    checksum=hashlib.sha512(b"invoice").hexdigest(),
+                    size=len(b"invoice"),
                 ),
             ),
             document_type=SimpleNamespace(value="invoice"),
@@ -485,9 +487,9 @@ def archive_event(
     document_id,
     version_id=None,
 ):
-    data = {"archive": "payroll", "document_id": str(document_id)}
+    data = {"archive": "payroll", "id": str(document_id)}
     if version_id is not None:
-        data["version_id"] = str(version_id)
+        data["head"] = str(version_id)
     return SimpleNamespace(data=orjson.dumps({"type": event_type, "data": data}))
 
 
@@ -619,6 +621,8 @@ async def test_archive_deletion_and_inflight_index_ordering(
                 ArchiveRepresentation(
                     representation_id=item.representation_id,
                     content_type=item.content_type,
+                    checksum=hashlib.sha512(b"invoice").hexdigest(),
+                    size=len(b"invoice"),
                 )
                 for item in document.representations
             ),

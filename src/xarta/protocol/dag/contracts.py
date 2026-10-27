@@ -152,7 +152,15 @@ DOCUMENT_SOURCE_DEFINITIONS["bundle_node_document"] = {
 
 ARCHIVE_REPRESENTATION = _object(
     {
-        "representation_id": {"oneOf": [UUID, {"type": "null"}]},
+        "representation_id": {
+            "oneOf": [UUID, {"type": "null"}],
+            "description": (
+                "Globally unique across every archive, document and version on the "
+                "receiving service; never reuse it for another version or document. "
+                "Omit it for a single representation to derive a fresh ID from the "
+                "node execution, or use a flow-profile $generated UUID."
+            ),
+        },
         "name": {"type": ["string", "null"], "minLength": 1},
         "metadata": {"type": "object"},
         "source": {"$ref": "#/$defs/document_source"},

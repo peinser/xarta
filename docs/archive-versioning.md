@@ -74,9 +74,11 @@ and lifecycle may change. The archive schema is the independent Sqitch project u
 ```
 
 Every request is one complete snapshot. Version and representation metadata are explicit;
-they are not inferred from source documents. Multiple representations require explicit
-representation IDs and `default_representation_id`. A single representation may omit both,
-in which case the service derives its identity deterministically. The request and snapshot
+they are not inferred from source documents. Multiple representations require
+`representations.default`. A single representation may omit its ID and the default, in
+which case the service derives its identity deterministically. Representation IDs are
+globally unique on the service, across archives, documents and versions; use new IDs for
+every version (see [representation identity](archive-capability.md#representation-identity)). The request and snapshot
 fingerprints include all snapshot semantics and every representation's checksum and size.
 
 The Archive DAG uses the same shape, except each representation contains a generic
@@ -131,7 +133,7 @@ negotiated downloads. Stored SHA-512 and size are verified before content is ret
 
 Version listing is ordered by `(created_at DESC, version.id DESC)` and uses opaque,
 resource-bound keyset cursors. `limit` defaults to 50 and must be between 1 and 100. The
-response reports `head_version_id` separately from `items`.
+response reports the current HEAD version UUID as `head`, separately from `items`.
 Cursor metadata is grouped as `pagination: {limit, next}`: `limit` is the effective
 maximum batch size; `next` is an opaque continuation token or null at the end.
 Pass `pagination.next` unchanged as the next request's `cursor` query parameter.
@@ -149,7 +151,7 @@ Details and representation collections group selection as
 `representations: {default, items}`. Each representation uses `id`, `name`, `metadata`,
 and `content: {type, size_bytes, checksum, availability}`. `available` means bytes
 are recorded as retained; `metadata-only` means only descriptive records remain.
-Snapshot `content_availability` aggregates the representation states and becomes
+Version-level `availability` aggregates the representation states and becomes
 `metadata-only` only when no representation retains bytes.
 
 HTTP timestamps are `created_at` and `expires_at`. Creation can be caller-supplied;

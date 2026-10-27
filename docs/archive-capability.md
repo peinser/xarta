@@ -139,7 +139,7 @@ Each workflow representation contains:
 | Field | Behavior |
 |---|---|
 | `source` | Required generic document-source object. Supported source kinds are (at the time of writing) `temporary`, `archive`, `render`, and `bundle`. |
-| `representation_id` | UUID, required explicitly when a workflow snapshot has several representations. |
+| `representation_id` | UUID, required explicitly when a workflow snapshot has several representations. It must be [globally unique](#representation-identity) on the receiving service: never reuse it for another version or document. |
 | `name` | Optional nonblank name, used as the download filename. The receiving service rejects control characters. |
 | `metadata` | Explicit representation-level JSON object; defaults to `{}`. |
 
@@ -153,6 +153,12 @@ Omitted workflow IDs are UUIDv5 values derived from `node_execution_id` and the
 document/representation positions. The task creation time supplies a stable
 `created` value. This keeps identity and time stable on redelivery of the same
 execution; it does not make a new execution the same document automatically.
+
+Explicit representation IDs are different: a fixed UUID written into a DAG or flow
+profile is the same on every execution, so the second execution conflicts. For
+several representations, which require explicit IDs, declare flow-profile
+[`$generated` UUIDs](flow-profiles.md) or have the caller supply fresh UUIDs per
+execution. See [representation identity](#representation-identity).
 
 For repeatable writes, use immutable source artifacts or pinned archive sources.
 A `render` source may produce different bytes when re-run, and an unpinned archive
@@ -191,7 +197,8 @@ connection/payload failures, HTTP `408`, `425`, `429`, and `5xx` responses becom
 retryable transport errors. The worker requests automatic replay with an initial
 5-second delay and backoff multiplier 2. Other unsuccessful statuses and malformed
 successful responses raise execution errors and follow the common runtime failure
-handling. See [tracked capabilities](tracked-capabilities.md) and
+handling. This includes `413` when one snapshot exceeds the receiving service's
+[request size limit](#request-size-limit): retrying cannot shrink the request. See [tracked capabilities](tracked-capabilities.md) and
 [dead-letter handling](dead-letter-handling.md) for runtime terminal outcomes such
 as `execution_failed` and `retry_exhausted`.
 
@@ -276,11 +283,33 @@ The `<manifest.json` form syntax sends the manifest as a text field, while `@`
 sends a file upload. Adjust the origin to the deployed service or gateway.
 
 HTTP representations use `field` and `content.type` instead of a workflow `source`.
-Upload fields and representation IDs must be unique within the snapshot. A single
-representation can omit its identity and the default identity. For multiple
-representations, supply explicit identities and the default identity, as above.
-The HTTP parser can derive omitted representation IDs, but the workflow parser
-requires them explicitly for multi-representation snapshots.
+Upload fields must be unique within the snapshot. A single representation can omit
+its identity and the default identity. For multiple representations, supply
+explicit identities and the default identity, as above. The HTTP parser can derive
+omitted representation IDs, but the workflow parser requires them explicitly for
+multi-representation snapshots.
+
+### Representation identity
+
+A representation ID identifies one immutable binary object, so it is **globally
+unique on the receiving archive service**: across every archive, every document,
+and every version. Uniqueness within the snapshot is not enough.
+
+- Use a new representation ID in every new version, even when the bytes are the
+  same as in the previous version. The equivalent-snapshot check compares content,
+  not identities, so an unchanged snapshot with new IDs still returns `unchanged`.
+- Never use the same representation ID in two documents or two archives. Archive
+  names are namespaces for documents, not for representation identities.
+- A reused ID is rejected with `409` and `error.code` `version_conflict`
+  (`Version identity already exists`). Nothing new is stored.
+- An omitted HTTP representation ID is derived from the version ID, the item
+  position, and its multipart field, so a new version ID yields new representation
+  IDs. Omitted workflow IDs derive from the node execution.
+- Deleting a document removes its representation rows, but the document identity
+  stays a tombstone and cannot be written again.
+
+The same identity remains valid for exact retries of the same request; see
+[idempotency](#always-send-an-idempotency-key).
 
 HTTP manifests identify documents with `id`, snapshots with `version: {id, parent}`,
 and representations with `representations: {default, items}`. Each upload item has
@@ -295,9 +324,10 @@ obsolete flat identity fields. Metadata maps remain free-form.
 |---|---|
 | `201` | Newly created document or version. |
 | `200` | Equivalent current snapshot (`unchanged`) or exact replay. |
-| `400` | Invalid manifest or fields, such as missing uploads or invalid timestamps. |
+| `400` | Invalid manifest or fields, such as missing uploads, invalid timestamps, or an unknown `document_type`. |
 | `404` | Unknown destination archive. |
 | `409` | Conflict, with `error.code` and explanatory `error.message`. |
+| `413` | The complete multipart request exceeds the deployment's [request size limit](#request-size-limit) (50 MiB with the Helm chart defaults). Nothing is stored. |
 
 A successful response contains only `archive`, logical document `id`, resolved
 `version`, and `outcome`:
@@ -414,11 +444,40 @@ requested one was stored. Changing `created_at` alone also does not force a new
 version, although a retention default derived from that timestamp can change
 `expires_at` and therefore the snapshot fingerprint.
 
-HTTP idempotency keys are scoped to an archive. When supplying `Idempotency-Key`,
-the manifest must include a stable `created_at`. Omitted HTTP document and version
-IDs derive deterministically from the archive, key, and document identity. Without
-a supplied key, the service generates a fresh key and defaults `created_at` to now;
-clients should not rely on that mode for retryable creation.
+### Always send an Idempotency-Key
+
+**Send an `Idempotency-Key` with every HTTP write, together with a stable
+`created_at`.** It is optional in the protocol, but it is the only way to retry
+safely. A timeout, a dropped connection, or a `5xx` response does not prove that
+nothing was stored. The service can commit the snapshot and still fail afterwards,
+for example when publishing the lifecycle event fails after the database commit;
+the client then receives `500` for a stored version.
+
+With a key, retry the identical request: the same key, the same manifest
+(including `created_at`), and the same files. A committed write returns its
+original result and identities with HTTP `200`; an uncommitted one is written now.
+Either way, exactly one version exists. Changing anything under the same key
+returns `409 version_conflict` instead of creating a second snapshot.
+
+Without a key, the service generates a fresh one per request and defaults
+`created_at` to the current time. A retry then behaves differently:
+
+| Manifest | Retry after an unknown result |
+|---|---|
+| Omits `id` / `version.id` | Derived from the fresh key, so the retry creates a **second document**. |
+| Supplies `id` and `version.id`, omits `created_at` | The new default `created_at` changes the request, so the retry returns `409 version_conflict` even if the first attempt stored the version. |
+| Supplies `id`, `version.id`, and `created_at` | The requested version identity still replays the original result. |
+
+Key rules:
+
+- Keys are scoped to an archive. Use one key per intended snapshot, for example
+  `invoice-2026-0042-v1`; never reuse it for different content.
+- When supplying a key, `created_at` is required, because a server default would
+  differ between attempts.
+- Omitted HTTP document and version IDs derive deterministically from the archive,
+  key, and document identity, so a retry with the same key resolves to the same
+  identities.
+- An empty header value does not provide idempotency; send a nonempty key.
 
 The workflow adapter sends
 `<node_execution_id>:<document_id>:<version_id>` as the per-request key. Replay
@@ -428,7 +487,13 @@ removes them and leaves a tombstone that prevents reuse of the document identity
 ### Storage failure boundary
 
 Representations are written before SQL commit using immutable, conditional writes.
-Filesystem storage publishes with a hard link; S3 uses `If-None-Match: *`.
+Filesystem storage writes a temporary file, `fsync`s it, publishes it with a hard
+link, and then `fsync`s the containing directory; directories it creates are also
+synced into their parents. The bytes and their directory entries are therefore
+durable before PostgreSQL commits a reference to them. Each representation write
+costs these synchronous flushes; on network filesystems, measure write latency.
+S3 uses `If-None-Match: *`; the object store is responsible for durability once
+it acknowledges the PUT.
 Each parsed snapshot gets a fresh, server-generated allocation UUID. Each physical
 filename ends with `{representation_id}.{allocation_id}` within its backend's key
 layout. A different request cannot adopt that attempt's allocations. A low-level
@@ -495,7 +560,7 @@ document UUID. Details, representation collections, and write responses group
 snapshot identity as **`version: {"id": "<version UUID>", "parent": null}`**;
 `parent` is the preceding version UUID when one exists, not an embedded object.
 Details also contain `archive`, `created_at`, `expires_at`, `document_type`,
-`metadata`, `content_availability`, and `representations: {default, items}`.
+`metadata`, `availability`, and `representations: {default, items}`.
 Each representation has `id`, `name`, `metadata`, and
 `content: {type, size_bytes, checksum, availability}`. The checksum is an object
 with a `sha512` hexadecimal digest. Storage paths, bucket names,
@@ -503,8 +568,8 @@ backend identities, and credentials are not exposed.
 
 `content.availability` is `available` while that representation's bytes are
 recorded as retained, or `metadata-only` after removal. It is not workflow progress,
-a live storage-health check, or an expiry check. The snapshot's aggregate
-`content_availability` remains `available` while **any** representation retains
+a live storage-health check, or an expiry check. The version-level `availability`
+aggregates its representations under the same name: it remains `available` while **any** representation retains
 bytes; older deployments may have left a metadata-only default. Sizes and checksums
 continue to describe the original bytes after removal.
 
@@ -535,7 +600,7 @@ implement conditional `304` responses or byte-range downloads.
 GET /api/v1/archive/archives/default/documents/{document_id}/versions?limit=50
 ```
 
-The response includes `archive`, `id`, `head_version_id`, `items`, and
+The response includes `archive`, `id`, `head`, `items`, and
 `pagination: {limit, next}`. Pass a non-null `pagination.next` unchanged as the
 next request's `cursor` query parameter. It is an opaque token, not a URL or a page
 number. `next: null` ends traversal. `pagination.limit` is the effective maximum
@@ -545,7 +610,7 @@ The default limit is 50; the allowed range is 1–100. Cursors are opaque and bo
 to the archive/document collection; malformed or cross-resource cursors are
 rejected.
 
-Ordering is `(created_at DESC, version.id DESC)`. Use `head_version_id` to identify
+Ordering is `(created_at DESC, version.id DESC)`. Use `head` (a version UUID) to identify
 current `HEAD`, rather than assuming the first history item is current. A cursor
 does not freeze the collection while concurrent writes occur.
 
@@ -982,10 +1047,77 @@ and concurrency together; these paths are not streaming transfers.
 The core Helm chart exposes archive deployment configuration through
 `services.archive`, including `settings.adapters.config`, `existingSecret`,
 `settings.storage.config`, `settings.storage.existingSecret`,
-`settings.storage.mounts`, and `settings.deletionReconciler`. The adapter Secret
+`settings.storage.mounts`, `settings.maxRequestBodyBytes`, and
+`settings.deletionReconciler`. The adapter Secret
 contains `archive.json`; the storage Secret contains `archive-storage.json`.
 See the [archive deployment template](../k8s/helm/charts/core/templates/deployments/service-archive.yaml)
 and [expiration CronJob template](../k8s/helm/charts/core/templates/cronjobs/expire-archived-documents.yaml).
+
+### Request size limit
+
+The core Helm chart limits every archive HTTP request body to **50 MiB
+(52,428,800 bytes)**, configured by one value:
+
+```yaml
+services:
+  archive:
+    settings:
+      maxRequestBodyBytes: 52428800
+```
+
+**What counts.** The limit applies to the complete HTTP request body, not to each
+representation. For a snapshot write that is the `manifest` field, every
+representation part, and the multipart boundaries and part headers. The sum of
+the representation sizes must therefore stay slightly below the limit; the
+manifest and multipart framing are usually a few kilobytes, more with large
+metadata. Each workflow archive submission is one such request per snapshot, so
+the limit applies per document version, not per archive node. Downloads, details,
+and other responses are not limited by it, so content stored under a larger
+earlier limit stays readable.
+
+**Where it is enforced.** The chart applies the same byte value at two layers:
+
+| Layer | Setting | Rejection |
+|---|---|---|
+| Archive service | `SANIC_REQUEST_MAX_SIZE` on the archive Deployment | HTTP `413` in the archive error envelope, shown below. |
+| Archive ingress (disabled by default) | `nginx.ingress.kubernetes.io/proxy-body-size` on the archive Ingress | HTTP `413` generated by ingress-nginx, with its own HTML body rather than the archive JSON envelope. |
+
+The service limit is authoritative. It also applies to in-cluster callers that
+bypass the ingress, such as archive workflow workers and the expiration job.
+Sanic checks both declared `Content-Length` and chunked bodies, and rejects the
+request before the write handler parses the manifest. A rejected write therefore
+stores no content, creates no version, and records no idempotency entry:
+
+```json
+{
+  "error": {
+    "code": "content_too_large",
+    "message": "Request body exceeds the size limit"
+  }
+}
+```
+
+The service limit covers every route served by the archive process. Metadata
+search keeps its own smaller 16 KiB JSON body limit.
+
+**Workflow behavior.** The outbound adapter treats `413` as a non-retryable
+execution error, because a retry would send the same oversized snapshot. The node
+follows the common runtime failure handling. Archive nodes are not multi-document
+transactions: snapshots submitted earlier in the same node may already be stored.
+The limit belongs to the *receiving* archive service, so a destination served by
+another deployment can have a different limit.
+
+**Changing the limit.** Change `services.archive.settings.maxRequestBodyBytes`.
+The Deployment and the archive Ingress both follow, which keeps the layers
+consistent. Configure any gateway or load balancer in front of the ingress
+separately; it can reject smaller bodies first. Raising the limit increases
+memory use: upload bodies are fully materialized in memory, and the raw body and
+the parsed multipart parts coexist while a request is handled. Plan for roughly
+twice the body size per concurrent upload, on top of normal process memory, and
+set the archive container's memory requests and limits to match.
+
+Outside Helm, such as local development or a manual container run, the limit is
+Sanic's default of 100,000,000 bytes unless `SANIC_REQUEST_MAX_SIZE` is set.
 
 ## Operations and troubleshooting
 
@@ -998,6 +1130,7 @@ and [expiration CronJob template](../k8s/helm/charts/core/templates/cronjobs/exp
 | Unknown archive | Check the logical archive registry on the receiving service, not just the worker's destination names. |
 | `300` on a download | Several representations match equally. Select an exact representation. |
 | `406` on a download | The requested `Accept` does not match an available representation. |
+| `413` on a write | The complete multipart snapshot exceeds the [request size limit](#request-size-limit). A JSON `content_too_large` body came from the archive service; an HTML body came from the ingress or another proxy. Reduce the snapshot or raise `services.archive.settings.maxRequestBodyBytes`. |
 | Details exist but historical content is unavailable | Inspect recorded availability. Content removed by older deployments cannot be restored by disabling history cleanup. |
 | Content unavailable unexpectedly | Check aggregate lifecycle, backend revision availability, and the stored object's existence. |
 | Integrity verification failure | Investigate stored-object corruption or external modification; content is deliberately not returned. |

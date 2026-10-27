@@ -56,6 +56,8 @@ supersedes that notice. The search consumer may remove projections early on
 `deletion-requested` and also handles `deleted` independently. This is a notification
 contract, not fire-and-forget publication: the request handler still awaits publication,
 and a publication error can fail the HTTP request after its database transition committed.
+Writers must therefore retry with the same `Idempotency-Key`; see
+[Always send an Idempotency-Key](archive-capability.md#always-send-an-idempotency-key).
 
 ## Envelope
 
@@ -72,25 +74,61 @@ Creation events contain a complete immutable snapshot:
   "datacontenttype": "application/json",
   "data": {
     "archive": "payroll",
-    "document_id": "2f91a80d-06d6-44e4-a0aa-ce67a89dcdd3",
-    "version_id": "4f93c246-1ada-4789-87c0-4a262ce30e54",
-    "parent_version_id": "af24242e-ee22-4dc8-9594-f1f8052bb0e0",
-    "outcome": "version_created",
+    "id": "2f91a80d-06d6-44e4-a0aa-ce67a89dcdd3",
+    "version": {
+      "id": "4f93c246-1ada-4789-87c0-4a262ce30e54",
+      "parent": "af24242e-ee22-4dc8-9594-f1f8052bb0e0"
+    },
     "document_type": "payslip",
-    "metadata": {"employee": "123"},
-    "default_representation_id": "9b167514-f403-4771-8db9-9476a9a2d6bd",
-    "representations": [{
-      "representation_id": "9b167514-f403-4771-8db9-9476a9a2d6bd",
-      "name": "original",
-      "content_type": "application/pdf",
-      "metadata": {},
-      "checksum": {"sha512": "..."},
-      "size": 1234,
-      "state": "available"
-    }]
+    "metadata": {"employee": "E-0042", "period": "2026-08"},
+    "representations": {
+      "default": "9b167514-f403-4771-8db9-9476a9a2d6bd",
+      "items": [{
+        "id": "9b167514-f403-4771-8db9-9476a9a2d6bd",
+        "name": "payslip-2026-08.pdf",
+        "metadata": {"role": "human-readable"},
+        "content": {
+          "type": "application/pdf",
+          "checksum": {"sha512": "<128 lowercase hexadecimal characters>"},
+          "size_bytes": 48213,
+          "availability": "available"
+        }
+      }]
+    },
+    "outcome": "version_created"
   }
 }
 ```
+
+`data` uses the same resource shapes as the HTTP API: `id` is the logical document
+UUID, `version` is the `{id, parent}` identity of the new HEAD, and
+`representations` matches the details response, including server-computed
+`content.checksum` and `content.size_bytes`. `outcome` is `created` or
+`version_created`.
+
+Deletion events carry no snapshot. `head` is the UUID of the document's HEAD
+version when deletion was requested or finalized:
+
+```json
+{
+  "specversion": "1.0",
+  "id": "5d0f9f8e-3b8a-5f0e-9c55-0a6f3c1e2b77",
+  "type": "xarta.archive.document.deleted",
+  "source": "urn:xarta:archive",
+  "subject": "payroll/2f91a80d-06d6-44e4-a0aa-ce67a89dcdd3",
+  "time": "2036-09-01T00:15:03.402118Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "archive": "payroll",
+    "id": "2f91a80d-06d6-44e4-a0aa-ce67a89dcdd3",
+    "head": "4f93c246-1ada-4789-87c0-4a262ce30e54",
+    "outcome": "deleted"
+  }
+}
+```
+
+`deletion-requested` events have the same shape with `outcome`
+`deletion_requested`.
 
 Payload fields are allow-listed. Events never expose storage keys, backend names or
 revisions, credentials, buckets, paths, or content. Version and representation metadata may
@@ -105,5 +143,5 @@ contain sensitive application data, so `DOCUMENTS` access and retention must be 
 | `xarta.archive.document.deletion-requested` | Advisory early notice that the aggregate changes from `active` to `deleting`; not a prerequisite for `deleted` |
 | `xarta.archive.document.deleted` | All representation content is gone and the aggregate is finalized |
 
-Consumers must use archive, document, version, and representation identities rather than
+Consumers must use `archive`, `id`, `version.id`/`head`, and representation identities rather than
 assume strict ordering. JetStream sequence reflects broker acceptance order only.
